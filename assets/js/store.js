@@ -81,6 +81,12 @@ window.Store = (function () {
     }),
     setCardStatus: (id, status) => update((s) => { s.cards.find((c) => c.id === id).status = status; }),
     deleteCard: (id) => update((s) => { s.cards = s.cards.filter((c) => c.id !== id); }),
+    // Vídeo do Card: mutator recebe (video, card). Inicializa a estrutura se faltar.
+    withVideo: (id, mutator) => update((s) => {
+      const card = s.cards.find((c) => c.id === id);
+      if (!card.video) card.video = { original: null, versions: [], retention: null, chosenVersionId: null };
+      mutator(card.video, card);
+    }),
     toggleChecklist: (cardId, gi, ii) => update((s) => {
       const card = s.cards.find((c) => c.id === cardId);
       card.checklist[gi].items[ii].done = !card.checklist[gi].items[ii].done;

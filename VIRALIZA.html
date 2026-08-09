@@ -643,6 +643,31 @@ body {
 .rec-after { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 14px; }
 @media (max-width: 640px) { .rec-sliders { grid-template-columns: 1fr; } .rec-after { grid-template-columns: 1fr; } }
 
+/* ============ Vídeo do Card (VideoStudio) ============ */
+#vs-overlay .rec-shell { max-width: 820px; }
+.vs-analyzing { text-align: center; padding: 34px 20px; }
+.vs-spinner { width: 46px; height: 46px; border-radius: 50%; border: 4px solid var(--border-2); border-top-color: var(--accent); margin: 0 auto; animation: spin 0.9s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.scene-card { background: var(--panel-2); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 14px; margin-bottom: 10px; }
+.scene-card.featured { border-color: var(--accent-dim); background: linear-gradient(180deg, var(--accent-soft), var(--panel-2)); }
+.scene-top { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 9px; }
+.scene-time { font-size: 20px; font-weight: 800; color: var(--text-0); font-variant-numeric: tabular-nums; margin-bottom: 8px; }
+.scene-reason { color: var(--text-1); font-size: 13px; line-height: 1.5; margin-bottom: 9px; }
+.scene-screen { background: var(--bg-2); border: 1px solid var(--border-2); border-left: 3px solid var(--accent); border-radius: 8px; padding: 9px 12px; color: var(--text-0); font-size: 13px; margin-bottom: 9px; }
+.scene-struct { color: var(--text-2); font-size: 12px; }
+
+.vs-compare { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.vs-tag { font-size: 12px; font-weight: 700; color: var(--text-2); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.6px; }
+.vs-screen-text { position: absolute; left: 12px; right: 12px; bottom: 14px; text-align: center; color: #fff; font-weight: 800; font-size: 15px; text-shadow: 0 2px 10px rgba(0,0,0,0.95); pointer-events: none; }
+
+.vs-timeline { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 12px; }
+.vs-scene-chip { background: var(--bg-2); border: 1px solid var(--border-2); border-radius: 8px; padding: 6px 11px; font-size: 12px; color: var(--text-1); }
+.vs-scene-chip.strong { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-2); font-weight: 700; }
+.vs-arrow { color: var(--text-3); font-size: 13px; }
+
+@media (max-width: 640px) { .vs-compare { grid-template-columns: 1fr; } }
+
 </style>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%2310b981'/%3E%3Ctext x='50' y='70' font-size='60' font-family='Arial' font-weight='bold' text-anchor='middle' fill='%23041209'%3EV%3C/text%3E%3C/svg%3E" />
 </head>
@@ -982,6 +1007,12 @@ window.Store = (function () {
     }),
     setCardStatus: (id, status) => update((s) => { s.cards.find((c) => c.id === id).status = status; }),
     deleteCard: (id) => update((s) => { s.cards = s.cards.filter((c) => c.id !== id); }),
+    // Vídeo do Card: mutator recebe (video, card). Inicializa a estrutura se faltar.
+    withVideo: (id, mutator) => update((s) => {
+      const card = s.cards.find((c) => c.id === id);
+      if (!card.video) card.video = { original: null, versions: [], retention: null, chosenVersionId: null };
+      mutator(card.video, card);
+    }),
     toggleChecklist: (cardId, gi, ii) => update((s) => {
       const card = s.cards.find((c) => c.id === cardId);
       card.checklist[gi].items[ii].done = !card.checklist[gi].items[ii].done;
@@ -1743,6 +1774,344 @@ window.Views = (function () {
 </script>
   <script>
 /* ============================================================
+   VIRALIZA — Vídeo do Card
+   Dois caminhos (Gravar agora / Enviar vídeo) → mesmo fluxo:
+   revisar → aprovar → análise de retenção → abertura inteligente
+   → versão editada → salvar/escolher versão.
+   Processamento de vídeo simulado (MVP), mas com fluxo funcional.
+   ============================================================ */
+window.VideoStudio = (function () {
+  const S = window.Store, U = window.UI, esc = U.esc;
+
+  // Registro de blob URLs em memória (não persistem no localStorage)
+  const URLS = {};
+  let pending = null; // meta do vídeo em revisão (antes de aprovar)
+  let cid = null;
+
+  function card() { return S.sel.card(cid); }
+  function vid() { const c = card(); return c && c.video ? c.video : { original: null, versions: [], retention: null, chosenVersionId: null }; }
+  function mmss(s) { s = Math.max(0, Math.round(s || 0)); const m = Math.floor(s / 60), r = s % 60; return String(m).padStart(2, "0") + ":" + String(r).padStart(2, "0"); }
+
+  // ============================================================
+  // Entradas
+  // ============================================================
+  // Chamado pelo Recorder após finalizar a gravação
+  function review(cardId, meta) {
+    cid = cardId;
+    pending = Object.assign({ source: "gravado" }, meta);
+    renderReview();
+  }
+
+  // Enviar vídeo da galeria
+  function openUpload(cardId) {
+    cid = cardId;
+    const inp = document.createElement("input");
+    inp.type = "file";
+    inp.accept = "video/mp4,video/quicktime,video/webm,video/*";
+    inp.onchange = () => {
+      const f = inp.files && inp.files[0];
+      if (!f) return;
+      const url = URL.createObjectURL(f);
+      pending = { source: "enviado", fileName: f.name, size: (f.size / 1048576).toFixed(1) + " MB", url, mime: f.type, duration: 0, simulated: false };
+      // tenta ler a duração real
+      const probe = document.createElement("video");
+      probe.preload = "metadata"; probe.src = url;
+      probe.onloadedmetadata = () => { pending.duration = Math.round(probe.duration) || estimateDuration(); renderReview(); };
+      probe.onerror = () => { pending.duration = estimateDuration(); renderReview(); };
+      setTimeout(() => { if (document.getElementById("vs-overlay")) return; if (pending) { pending.duration = pending.duration || estimateDuration(); renderReview(); } }, 700);
+    };
+    inp.click();
+  }
+  function estimateDuration() { return 22 + Math.floor(Math.random() * 20); }
+
+  // ============================================================
+  // 1) Revisar vídeo (gravado ou enviado)
+  // ============================================================
+  function renderReview() {
+    const m = pending;
+    const isRec = m.source === "gravado";
+    const player = playerHTML(m.url, m.simulated, mmss(m.duration));
+    const metaRows = m.source === "enviado"
+      ? `<div class="kv" style="margin-top:12px"><div class="k">Arquivo</div><div class="v">${esc(m.fileName)}</div><div class="k">Duração</div><div class="v">${mmss(m.duration)}</div><div class="k">Tamanho</div><div class="v">${esc(m.size || "—")}</div></div>`
+      : `<div class="kv" style="margin-top:12px"><div class="k">Origem</div><div class="v">Gravado no app (teleprompter)</div><div class="k">Duração</div><div class="v">${mmss(m.duration)}</div></div>`;
+    shell(isRec ? "Revisar gravação" : "Revisar vídeo enviado", `
+      ${player}
+      ${metaRows}
+      <div class="alert info" style="margin-top:14px"><span class="al-ico">👀</span><div class="al-body" style="font-size:12px">Assista e aprove. Só depois de <b>Aprovar vídeo</b> o Viraliza analisa a retenção e sugere uma abertura mais forte.</div></div>`,
+      `<button class="btn btn-ghost" data-vs="cancel">Cancelar</button>
+       <button class="btn btn-sm" data-vs="${isRec ? "again-rec" : "again-up"}">${isRec ? "↺ Gravar novamente" : "📤 Enviar outro vídeo"}</button>
+       <button class="btn btn-sm" data-vs="save-original">💾 Salvar original no card</button>
+       <button class="btn btn-primary" data-vs="approve">✓ Aprovar vídeo</button>`);
+  }
+
+  function saveOriginal() {
+    const m = pending;
+    const version = { id: S.uid("ver"), kind: "Original", label: "Original", source: m.source, fileName: m.fileName || ("video-" + cid.slice(-4)), duration: m.duration, size: m.size || "—", createdAt: today(), status: "Salvo" };
+    if (m.url) URLS["orig:" + cid] = m.url;
+    S.actions.withVideo(cid, (v, c) => {
+      v.original = { id: version.id, source: m.source, fileName: version.fileName, duration: m.duration, size: version.size, createdAt: today() };
+      // substitui Original anterior, se houver
+      v.versions = v.versions.filter((x) => x.kind !== "Original");
+      v.versions.unshift(version);
+      if (!v.chosenVersionId) v.chosenVersionId = version.id;
+      c.status = "Gravado";
+    });
+    // também registra como criativo (compatibilidade com aba/analise)
+    S.actions.addCreative(cid, { type: m.source === "gravado" ? "Vídeo gravado" : "Vídeo enviado", source: m.source === "gravado" ? "Gravação no app" : "Upload da galeria", status: "Original salvo", fileName: version.fileName, creditsUsed: 0 });
+    return version;
+  }
+
+  // ============================================================
+  // 2) Análise de retenção
+  // ============================================================
+  function retention(reopen) {
+    const v = vid();
+    if (!v.original && !reopen) { U.toast("Grave ou envie um vídeo primeiro", "warn"); return; }
+    shell("Análise de retenção", `
+      <div class="vs-analyzing" id="vs-analyzing">
+        <div class="vs-spinner"></div>
+        <h3 style="color:var(--text-0);margin-top:16px">Estamos procurando a melhor cena para abrir seu vídeo.</h3>
+        <p class="muted" style="margin-top:6px">Analisando ritmo, picos de atenção e momentos de virada…</p>
+      </div>`, "");
+    setTimeout(() => showRetention(), 1300);
+  }
+
+  function showRetention(selectedIdx) {
+    const c = card();
+    const dur = (c.video && c.video.original ? c.video.original.duration : 0) || pending && pending.duration || 25;
+    let r = c.video && c.video.retention;
+    if (!r) { r = buildRetention(dur, c); S.actions.withVideo(cid, (v) => v.retention = r); }
+    const idx = selectedIdx == null ? 0 : selectedIdx;
+    const main = r.suggestions[idx];
+    const orig = "orig:" + cid;
+    shell("Análise de retenção", `
+      <div class="info-block"><h4>🎯 Cena de retenção sugerida</h4>
+        <div class="scene-card featured">
+          <div class="scene-top"><span class="pill pill-accent">⭐ ${esc(main.label)}</span><span class="pill pill-gray">${esc(main.type)}</span></div>
+          <div class="scene-time">${mmss(main.start)} — ${mmss(main.end)} <span class="muted">· ${main.end - main.start}s</span></div>
+          <div class="scene-reason"><b>Motivo:</b> ${esc(main.reason)}</div>
+          <div class="scene-screen"><span class="tp-label" style="color:var(--text-3)">Texto na tela sugerido</span>“${esc(main.screenText)}”</div>
+          <div class="scene-struct"><b>Nova estrutura:</b> ${esc(main.structure)}</div>
+        </div>
+      </div>
+      <div id="vs-alts"></div>
+      <div class="flex gap-8 wrap" style="margin-top:6px">
+        <button class="btn btn-sm" data-vs="alts">🔀 Escolher outro trecho</button>
+      </div>`,
+      `<button class="btn btn-ghost" data-vs="back-card">Fechar</button>
+       <button class="btn btn-primary" data-vs="gen-edited" data-idx="${idx}">🎬 Gerar vídeo editado</button>`);
+  }
+
+  function showAlternatives() {
+    const r = card().video.retention;
+    const box = document.getElementById("vs-alts");
+    if (!box) return;
+    box.innerHTML = `<div class="info-block"><h4>🔀 Sugestões alternativas</h4>
+      ${r.suggestions.map((s, i) => `
+        <div class="scene-card">
+          <div class="scene-top"><span class="pill pill-blue">Sugestão ${i + 1} — ${esc(s.label)}</span><span class="pill pill-gray">${esc(s.type)}</span></div>
+          <div class="scene-time">${mmss(s.start)} — ${mmss(s.end)} <span class="muted">· ${s.end - s.start}s</span></div>
+          <div class="scene-reason">${esc(s.reason)}</div>
+          <div class="scene-screen"><span class="tp-label" style="color:var(--text-3)">Texto na tela</span>“${esc(s.screenText)}”</div>
+          <button class="btn btn-sm btn-primary mt-16" data-vs="use-scene" data-idx="${i}">Usar este trecho</button>
+        </div>`).join("")}</div>`;
+  }
+
+  // ============================================================
+  // 3) Gerar vídeo editado (Abertura Inteligente)
+  // ============================================================
+  function generateEdited(idx) {
+    const r = card().video.retention;
+    const scene = r.suggestions[idx] || r.suggestions[0];
+    shell("Gerando vídeo editado", `
+      <div class="vs-analyzing"><div class="vs-spinner"></div>
+        <h3 style="color:var(--text-0);margin-top:16px">Montando a Abertura Inteligente…</h3>
+        <p class="muted" style="margin-top:6px">Colocando a cena forte no início, aplicando texto na tela e legenda automática.</p>
+      </div>`, "");
+    setTimeout(() => {
+      const version = {
+        id: S.uid("ver"), kind: "Abertura Inteligente", label: "Vídeo com Abertura Inteligente", source: "editado",
+        fileName: "abertura-inteligente-" + cid.slice(-4) + ".mp4", duration: (card().video.original ? card().video.original.duration : scene.end) || scene.end,
+        sceneUsed: mmss(scene.start) + " — " + mmss(scene.end), screenText: scene.screenText, aiNote: scene.reason,
+        structure: scene.structure, sceneType: scene.type, createdAt: today(), status: "Vídeo editado gerado",
+      };
+      // a versão editada reaproveita o mesmo blob do original para preview (reordenação é simulada)
+      if (URLS["orig:" + cid]) URLS[version.id] = URLS["orig:" + cid];
+      S.actions.withVideo(cid, (v, c) => {
+        v.versions = v.versions.filter((x) => x.kind !== "Abertura Inteligente" || false); // mantém histórico? removemos só a anterior de mesmo nome
+        // na verdade queremos histórico: renomeia a anterior como Variação
+        const prev = v.versions.find((x) => x.kind === "Abertura Inteligente");
+        if (prev) { prev.kind = "Variação"; prev.label = "Variação — " + (prev.sceneUsed || ""); }
+        v.versions.splice(v.original ? 1 : 0, 0, version);
+        c.status = "Em edição";
+      });
+      editedReady(version.id);
+    }, 1400);
+  }
+
+  function editedReady(versionId) {
+    const v = vid();
+    const edited = v.versions.find((x) => x.id === versionId);
+    const origUrl = URLS["orig:" + cid];
+    shell("Vídeo editado pronto", `
+      <div class="vs-compare">
+        <div>
+          <div class="vs-tag">Original</div>
+          ${playerHTML(origUrl, !origUrl, mmss(v.original ? v.original.duration : 0))}
+        </div>
+        <div>
+          <div class="vs-tag text-accent">✨ Abertura Inteligente</div>
+          ${playerHTML(URLS[versionId], !URLS[versionId], mmss(edited.duration), edited.screenText)}
+        </div>
+      </div>
+      <div class="info-block" style="margin-top:16px"><h4>🎬 O que a IA fez</h4>
+        <div class="kv">
+          <div class="k">Cena usada na abertura</div><div class="v">${esc(edited.sceneUsed)} <span class="pill pill-gray">${esc(edited.sceneType || "")}</span></div>
+          <div class="k">Texto aplicado na tela</div><div class="v">“${esc(edited.screenText)}”</div>
+          <div class="k">Motivo da IA</div><div class="v">${esc(edited.aiNote)}</div>
+        </div>
+        <div class="vs-timeline">${timelineChips(edited.structure)}</div>
+        <div class="pill pill-accent" style="margin-top:10px">✓ ${esc(edited.status)}</div>
+      </div>`,
+      `<button class="btn btn-sm" data-vs="use-orig">Usar versão original</button>
+       <button class="btn btn-sm" data-vs="gen-other">🔁 Gerar outra versão</button>
+       <button class="btn btn-sm" data-vs="send-analysis" data-ver="${versionId}">🔍 Enviar para análise</button>
+       <button class="btn btn-primary" data-vs="use-edited" data-ver="${versionId}">✓ Usar versão editada</button>`);
+  }
+
+  function timelineChips(structure) {
+    const parts = (structure || "Cena forte → contexto → explicação → resultado → CTA").split(/→|›|>/).map((s) => s.trim()).filter(Boolean);
+    return parts.map((p, i) => `<span class="vs-scene-chip ${i === 0 ? "strong" : ""}">${i === 0 ? "▶ " : ""}${esc(p)}</span>`).join('<span class="vs-arrow">→</span>');
+  }
+
+  // ============================================================
+  // Players / helpers
+  // ============================================================
+  function playerHTML(url, simulated, durLabel, screenText) {
+    if (url) {
+      return `<div class="rec-stage" style="max-height:46vh">
+        <video src="${url}" controls playsinline style="width:100%;height:100%;object-fit:cover"></video>
+        <div class="rec-hud"><span class="rec-badge">⏱️ ${esc(durLabel)}</span></div>
+        ${screenText ? `<div class="vs-screen-text">“${esc(screenText)}”</div>` : ""}
+      </div>`;
+    }
+    return `<div class="rec-stage" style="max-height:46vh"><div class="rec-sim"><div><div class="rec-sim-ico">🎬</div><b style="color:var(--text-1)">Prévia do vídeo</b><div style="font-size:12px;margin-top:6px;max-width:280px">Duração ${esc(durLabel)}. Prévia simulada (sem vídeo real disponível nesta sessão) — o fluxo continua funcionando.</div></div></div>
+      ${screenText ? `<div class="vs-screen-text">“${esc(screenText)}”</div>` : ""}</div>`;
+  }
+
+  // Gera sugestões de cena baseadas na duração, roteiro e tipo
+  function buildRetention(dur, c) {
+    dur = Math.max(6, dur || 25);
+    const type = c.type || "";
+    const clamp = (a, b) => [Math.min(a, dur - 1), Math.min(b, dur)];
+    const byType = {
+      "Antes e depois": "Transformação", "Review": "Reação", "Demonstração": "Demonstração",
+      "Dor e Solução": "Problema visual", "Comparação": "Comparação", "Unboxing": "Produto aparecendo",
+      "Prova social": "Cliente reagindo",
+    };
+    const [rs, re] = clamp(Math.round(dur * 0.72), Math.round(dur * 0.72) + 5);
+    const [vs2, ve] = clamp(Math.round(dur * 0.44), Math.round(dur * 0.44) + 4);
+    const [ps, pe] = clamp(Math.round(dur * 0.28), Math.round(dur * 0.28) + 3);
+    const suggestions = [
+      { label: "Melhor retenção visual", type: byType[type] || "Resultado visual", start: rs, end: re,
+        reason: "Essa cena mostra o momento mais forte do vídeo e pode prender mais atenção logo no início.",
+        screenText: "Olha o que aconteceu no final…", structure: "Cena forte → contexto → explicação → resultado → CTA" },
+      { label: "Resultado final primeiro", type: "Resultado final", start: Math.min(dur - 4, Math.round(dur * 0.85)), end: Math.min(dur, Math.round(dur * 0.85) + 4),
+        reason: "Começar pelo resultado gera curiosidade: a pessoa fica para entender como chegou ali.",
+        screenText: "Espera até ver como ficou 👀", structure: "Resultado → como começou → passo a passo → CTA" },
+      { label: "Frase mais forte", type: "Frase forte", start: ps, end: pe,
+        reason: "Abrir com a frase de maior impacto acelera a promessa e melhora os 3 primeiros segundos.",
+        screenText: "Ninguém te conta isso…", structure: "Frase forte → prova → demonstração → resultado → CTA" },
+      { label: "Reação / momento de virada", type: "Momento de virada", start: vs2, end: ve,
+        reason: "A reação/virada é o pico emocional — ótimo gancho para reter e gerar comentário.",
+        screenText: "Não acredita? Olha isso.", structure: "Virada → contexto → explicação → benefício → CTA" },
+    ];
+    return { suggestions, createdAt: today() };
+  }
+
+  // ============================================================
+  // Ações de versão
+  // ============================================================
+  function chooseVersion(versionId) {
+    S.actions.withVideo(cid, (v) => v.chosenVersionId = versionId);
+    const v = vid(); const ver = v.versions.find((x) => x.id === versionId);
+    S.actions.setCardStatus(cid, "Pronto para publicar");
+    U.toast(`Versão “${ver ? ver.label : ""}” escolhida para publicação ✓`);
+  }
+
+  function sendToAnalysis(versionId) {
+    S.actions.setCardStatus(cid, "Enviado para análise");
+    S.actions.withVideo(cid, (v, c) => { const ver = v.versions.find((x) => x.id === versionId); if (ver) ver.status = "Enviado para análise"; });
+    S.update((s) => { const c = s.cards.find((x) => x.id === cid); if (c.content.creatives[0]) c.content.creatives[0].status = "Analisado"; });
+    U.toast("Versão enviada para análise da IA ✓");
+    closeToCard();
+  }
+
+  // ============================================================
+  // Shell / overlay
+  // ============================================================
+  function shell(title, body, foot) {
+    remove();
+    const o = document.createElement("div");
+    o.className = "rec-overlay"; o.id = "vs-overlay";
+    o.innerHTML = `<div class="rec-shell">
+      <div class="rec-head"><h3>${esc(title)}</h3><div class="x-btn" data-vs="close">✕</div></div>
+      <div class="rec-body">${body}</div>
+      ${foot ? `<div class="rec-foot">${foot}</div>` : ""}
+    </div>`;
+    document.body.appendChild(o);
+    o.querySelectorAll("[data-vs]").forEach((el) => el.onclick = () => handle(el.dataset.vs, el));
+  }
+  function remove() { const o = document.getElementById("vs-overlay"); if (o) o.remove(); }
+  function closeToCard() {
+    remove();
+    if (window.CardView && document.getElementById("modal-overlay")) window.App.openCard(cid);
+    else window.App.render();
+  }
+
+  function handle(action, el) {
+    switch (action) {
+      case "close": case "cancel": remove(); closeToCard(); break;
+      case "back-card": closeToCard(); break;
+      case "again-rec": remove(); if (pending && pending.url) { try { URL.revokeObjectURL(pending.url); } catch (e) {} } window.Recorder.open(cid); break;
+      case "again-up": remove(); openUpload(cid); break;
+      case "save-original": saveOriginal(); U.toast("Original salvo no card ✓"); closeToCard(); break;
+      case "approve": saveOriginal(); U.toast("Vídeo aprovado ✓"); retention(); break;
+      case "alts": showAlternatives(); break;
+      case "use-scene": { const i = +el.dataset.idx; showRetention(i); break; }
+      case "gen-edited": generateEdited(+el.dataset.idx); break;
+      case "gen-other": retention(true); break;
+      case "use-edited": chooseVersion(el.dataset.ver); closeToCard(); break;
+      case "use-orig": { const v = vid(); const o = v.versions.find((x) => x.kind === "Original"); if (o) chooseVersion(o.id); closeToCard(); break; }
+      case "send-analysis": sendToAnalysis(el.dataset.ver); break;
+    }
+  }
+
+  function today() { return new Date().toISOString().slice(0, 10); }
+
+  // Abertura direta a partir do card
+  function openEdited(cardId) {
+    cid = cardId; const v = vid();
+    const edited = v.versions.find((x) => x.kind === "Abertura Inteligente");
+    if (edited) editedReady(edited.id);
+    else if (v.original) retention(true);
+    else U.toast("Grave ou envie um vídeo primeiro", "warn");
+  }
+  function viewOriginal(cardId) {
+    cid = cardId; const v = vid();
+    if (!v.original) return U.toast("Nenhum vídeo original ainda", "warn");
+    shell("Vídeo original", playerHTML(URLS["orig:" + cid], !URLS["orig:" + cid], mmss(v.original.duration)) +
+      `<div class="kv" style="margin-top:12px"><div class="k">Origem</div><div class="v">${v.original.source === "gravado" ? "Gravado no app" : "Enviado da galeria"}</div><div class="k">Arquivo</div><div class="v">${esc(v.original.fileName)}</div></div>`,
+      `<button class="btn btn-ghost" data-vs="close">Fechar</button><button class="btn btn-primary" data-vs="gen-other">🎬 Gerar abertura inteligente</button>`);
+  }
+  function getUrl(key) { return URLS[key]; }
+
+  return { review, openUpload, retention, openEdited, viewOriginal, chooseVersion: (cardId, vId) => { cid = cardId; chooseVersion(vId); }, getUrl };
+})();
+
+</script>
+  <script>
+/* ============================================================
    VIRALIZA — Gravar agora (câmera + teleprompter)
    O roteiro aparece na tela como sobreposição (teleprompter) e
    NÃO é gravado no vídeo — o MediaRecorder captura apenas o
@@ -1981,7 +2350,22 @@ window.Recorder = (function () {
   // 3) Revisão + ações pós-gravação
   // ============================================================
   let aiDone = false;
+  // Após finalizar a gravação, entrega ao fluxo unificado do Vídeo do Card
   function renderReview() {
+    stopCamera();
+    const meta = {
+      source: "gravado",
+      fileName: `take-${cardId.slice(-4)}.webm`,
+      duration: recSeconds,
+      size: recordedBlob ? (recordedBlob.size / 1048576).toFixed(1) + " MB" : "—",
+      url: recordedUrl,
+      simulated: simulated,
+    };
+    close(true); // remove o overlay do gravador (silencioso)
+    window.VideoStudio.review(cardId, meta);
+  }
+
+  function renderReviewLegacy() {
     stopCamera(); aiDone = false;
     const dur = mmss(recSeconds);
     const preview = recordedUrl
@@ -2297,18 +2681,48 @@ window.CardView = (function () {
         <span class="pill pill-accent">${esc(cr.status)}</span></div>`).join("");
 
     if (ct.path === "gerar") return contentGenerate(c, creatives);
-    if (ct.path === "enviar") return contentSend(c, creatives);
-    if (ct.path === "gravar") return contentRecord(c, creatives);
+    return videoArea(c);
+  }
+
+  // Área "Vídeo do Card": gravar / enviar → revisar → aprovar → retenção → abertura inteligente
+  function videoArea(c) {
+    const v = c.video || { original: null, versions: [], chosenVersionId: null };
+    const hasOriginal = !!v.original;
+    const hasEdited = (v.versions || []).some((x) => x.kind === "Abertura Inteligente");
+    const kindIco = { "Original": "🎬", "Abertura Inteligente": "✨", "Variação": "🧬" };
+    const versions = (v.versions || []).map((ver) => {
+      const chosen = v.chosenVersionId === ver.id;
+      return `<div class="file-tile" style="margin-bottom:8px${chosen ? ";border-color:var(--accent-dim)" : ""}">
+        <div class="ft-ico">${kindIco[ver.kind] || "🎞️"}</div>
+        <div style="flex:1"><div class="ft-name">${esc(ver.label)} ${chosen ? '<span class="pill pill-accent" style="margin-left:6px">Em uso</span>' : ""}</div>
+          <div class="ft-meta">${esc(ver.kind)} · ${esc(ver.source)} · ${esc(ver.status || "")}${ver.duration ? " · " + fmtDur(ver.duration) : ""}</div></div>
+        ${chosen ? "" : `<button class="btn btn-xs" data-ca="use-version" data-ver="${ver.id}">Usar</button>`}
+        ${ver.kind === "Abertura Inteligente" ? `<button class="btn btn-xs" data-ca="view-edited">Ver</button>` : ver.kind === "Original" ? `<button class="btn btn-xs" data-ca="view-original">Ver</button>` : ""}
+      </div>`;
+    }).join("");
 
     return `
-      <p class="muted" style="margin-bottom:16px">Escolha como criar o conteúdo deste card. Três caminhos:</p>
-      <div class="content-paths">
-        <div class="content-path" data-path="gerar"><div class="cp-ico">✨</div><h4>Gerar com IA</h4><p>Crie um vídeo com IA a partir da foto do produto, com template e prévia.</p></div>
-        <div class="content-path" data-path="enviar"><div class="cp-ico">📤</div><h4>Enviar vídeo</h4><p>Suba um vídeo gravado por você e receba análise completa da IA.</p></div>
-        <div class="content-path" data-path="gravar"><div class="cp-ico">🎥</div><h4>Gravar agora</h4><p>Grave direto pelo sistema com roteiro e gancho na tela.</p></div>
+      <div class="info-block"><h4>🎥 Vídeo do Card</h4>
+        <p class="muted" style="margin-bottom:14px">Grave pelo sistema (com teleprompter) ou envie um vídeo da galeria. Depois de aprovar, o Viraliza encontra a melhor cena de retenção e gera uma <b>Abertura Inteligente</b> automaticamente.</p>
+        <div class="grid grid-2" style="gap:12px;margin-bottom:12px">
+          <div class="content-path" data-ca="open-recorder"><div class="cp-ico">🎥</div><h4>Gravar agora</h4><p>Câmera + teleprompter. O roteiro aparece para você ler e não entra no vídeo.</p></div>
+          <div class="content-path" data-ca="upload-gallery"><div class="cp-ico">📤</div><h4>Enviar vídeo</h4><p>Suba um vídeo da galeria (MP4, MOV, WEBM).</p></div>
+        </div>
+        <div class="flex gap-8 wrap">
+          <button class="btn btn-sm" data-ca="view-original" ${hasOriginal ? "" : "disabled"}>▶️ Ver original</button>
+          <button class="btn btn-sm" data-ca="gen-opening" ${hasOriginal ? "" : "disabled"}>✨ Gerar abertura inteligente</button>
+          <button class="btn btn-sm" data-ca="view-edited" ${hasEdited ? "" : "disabled"}>🎬 Ver versão editada</button>
+          <button class="btn btn-sm" data-ca="send-analysis-video" ${hasOriginal ? "" : "disabled"}>🔍 Enviar para análise</button>
+        </div>
       </div>
-      ${creatives ? `<div class="info-block"><h4>🎬 Criativos deste card</h4>${creatives}</div>` : ""}`;
+      ${versions ? `<div class="info-block"><h4>🎞️ Versões do vídeo</h4>${versions}<p class="muted" style="font-size:12px;margin-top:8px">Escolha qual versão será usada para publicação com o botão <b>Usar</b>.</p></div>`
+        : `<div class="empty" style="padding:24px"><div class="e-ico">🎬</div><h3>Ainda sem vídeo</h3><p>Grave agora ou envie um vídeo da galeria para começar.</p></div>`}
+      <div class="info-block mb-0" style="opacity:.85"><h4>✨ Ou gere com IA a partir da foto do produto</h4>
+        <p class="muted" style="font-size:12px;margin-bottom:10px">Caminho alternativo: criar um vídeo com IA usando a imagem do produto (consome créditos).</p>
+        <button class="btn btn-sm" data-path="gerar">Abrir geração com IA →</button>
+      </div>`;
   }
+  function fmtDur(s) { s = Math.round(s || 0); const m = Math.floor(s / 60), r = s % 60; return String(m).padStart(2, "0") + ":" + String(r).padStart(2, "0"); }
 
   function contentGenerate(c, creatives) {
     const cr = S.get().credits;
@@ -2516,7 +2930,7 @@ window.CardView = (function () {
     root.querySelectorAll("[data-sim]").forEach((el) => el.onclick = () => U.simulated(el.dataset.sim, "Fluxo salvo no card."));
 
     // Card actions
-    root.querySelectorAll("[data-ca]").forEach((el) => el.onclick = () => cardAction(el.dataset.ca));
+    root.querySelectorAll("[data-ca]").forEach((el) => el.onclick = () => cardAction(el.dataset.ca, el));
   }
 
   function applyMethod(method) {
@@ -2573,14 +2987,24 @@ window.CardView = (function () {
   }
 
   // Central card action handler
-  function cardAction(a) {
+  function cardAction(a, el2) {
     const c = card();
     const cr = S.get().credits;
+    const a2 = el2 ? el2.dataset.ver : null;
     switch (a) {
       case "iniciar": S.actions.setCardStatus(cardId, "Roteiro"); U.toast("Execução iniciada"); refreshHead(); break;
       case "send-video": S.actions.patchCard(cardId, "content.path", "enviar"); tab = "Conteúdo"; render(); break;
       case "record": S.actions.patchCard(cardId, "content.path", "gravar"); tab = "Conteúdo"; window.Recorder.open(cardId); break;
       case "open-recorder": window.Recorder.open(cardId); break;
+      case "upload-gallery": window.VideoStudio.openUpload(cardId); break;
+      case "view-original": window.VideoStudio.viewOriginal(cardId); break;
+      case "gen-opening": window.VideoStudio.retention(true); break;
+      case "view-edited": window.VideoStudio.openEdited(cardId); break;
+      case "use-version": if (a2) { window.VideoStudio.chooseVersion(cardId, a2); refreshBody(); refreshHead(); } break;
+      case "send-analysis-video":
+        S.actions.setCardStatus(cardId, "Enviado para análise");
+        S.update((s) => { const cc = s.cards.find((x) => x.id === cardId); if (cc.content.creatives[0]) cc.content.creatives[0].status = "Analisado"; });
+        U.toast("Vídeo enviado para análise da IA ✓"); render(); break;
       case "gen-ai": S.actions.patchCard(cardId, "content.path", "gerar"); tab = "Conteúdo"; render(); break;
       case "analyze":
         S.actions.setCardStatus(cardId, "Enviado para análise");

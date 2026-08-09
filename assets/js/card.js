@@ -186,18 +186,48 @@ window.CardView = (function () {
         <span class="pill pill-accent">${esc(cr.status)}</span></div>`).join("");
 
     if (ct.path === "gerar") return contentGenerate(c, creatives);
-    if (ct.path === "enviar") return contentSend(c, creatives);
-    if (ct.path === "gravar") return contentRecord(c, creatives);
+    return videoArea(c);
+  }
+
+  // Área "Vídeo do Card": gravar / enviar → revisar → aprovar → retenção → abertura inteligente
+  function videoArea(c) {
+    const v = c.video || { original: null, versions: [], chosenVersionId: null };
+    const hasOriginal = !!v.original;
+    const hasEdited = (v.versions || []).some((x) => x.kind === "Abertura Inteligente");
+    const kindIco = { "Original": "🎬", "Abertura Inteligente": "✨", "Variação": "🧬" };
+    const versions = (v.versions || []).map((ver) => {
+      const chosen = v.chosenVersionId === ver.id;
+      return `<div class="file-tile" style="margin-bottom:8px${chosen ? ";border-color:var(--accent-dim)" : ""}">
+        <div class="ft-ico">${kindIco[ver.kind] || "🎞️"}</div>
+        <div style="flex:1"><div class="ft-name">${esc(ver.label)} ${chosen ? '<span class="pill pill-accent" style="margin-left:6px">Em uso</span>' : ""}</div>
+          <div class="ft-meta">${esc(ver.kind)} · ${esc(ver.source)} · ${esc(ver.status || "")}${ver.duration ? " · " + fmtDur(ver.duration) : ""}</div></div>
+        ${chosen ? "" : `<button class="btn btn-xs" data-ca="use-version" data-ver="${ver.id}">Usar</button>`}
+        ${ver.kind === "Abertura Inteligente" ? `<button class="btn btn-xs" data-ca="view-edited">Ver</button>` : ver.kind === "Original" ? `<button class="btn btn-xs" data-ca="view-original">Ver</button>` : ""}
+      </div>`;
+    }).join("");
 
     return `
-      <p class="muted" style="margin-bottom:16px">Escolha como criar o conteúdo deste card. Três caminhos:</p>
-      <div class="content-paths">
-        <div class="content-path" data-path="gerar"><div class="cp-ico">✨</div><h4>Gerar com IA</h4><p>Crie um vídeo com IA a partir da foto do produto, com template e prévia.</p></div>
-        <div class="content-path" data-path="enviar"><div class="cp-ico">📤</div><h4>Enviar vídeo</h4><p>Suba um vídeo gravado por você e receba análise completa da IA.</p></div>
-        <div class="content-path" data-path="gravar"><div class="cp-ico">🎥</div><h4>Gravar agora</h4><p>Grave direto pelo sistema com roteiro e gancho na tela.</p></div>
+      <div class="info-block"><h4>🎥 Vídeo do Card</h4>
+        <p class="muted" style="margin-bottom:14px">Grave pelo sistema (com teleprompter) ou envie um vídeo da galeria. Depois de aprovar, o Viraliza encontra a melhor cena de retenção e gera uma <b>Abertura Inteligente</b> automaticamente.</p>
+        <div class="grid grid-2" style="gap:12px;margin-bottom:12px">
+          <div class="content-path" data-ca="open-recorder"><div class="cp-ico">🎥</div><h4>Gravar agora</h4><p>Câmera + teleprompter. O roteiro aparece para você ler e não entra no vídeo.</p></div>
+          <div class="content-path" data-ca="upload-gallery"><div class="cp-ico">📤</div><h4>Enviar vídeo</h4><p>Suba um vídeo da galeria (MP4, MOV, WEBM).</p></div>
+        </div>
+        <div class="flex gap-8 wrap">
+          <button class="btn btn-sm" data-ca="view-original" ${hasOriginal ? "" : "disabled"}>▶️ Ver original</button>
+          <button class="btn btn-sm" data-ca="gen-opening" ${hasOriginal ? "" : "disabled"}>✨ Gerar abertura inteligente</button>
+          <button class="btn btn-sm" data-ca="view-edited" ${hasEdited ? "" : "disabled"}>🎬 Ver versão editada</button>
+          <button class="btn btn-sm" data-ca="send-analysis-video" ${hasOriginal ? "" : "disabled"}>🔍 Enviar para análise</button>
+        </div>
       </div>
-      ${creatives ? `<div class="info-block"><h4>🎬 Criativos deste card</h4>${creatives}</div>` : ""}`;
+      ${versions ? `<div class="info-block"><h4>🎞️ Versões do vídeo</h4>${versions}<p class="muted" style="font-size:12px;margin-top:8px">Escolha qual versão será usada para publicação com o botão <b>Usar</b>.</p></div>`
+        : `<div class="empty" style="padding:24px"><div class="e-ico">🎬</div><h3>Ainda sem vídeo</h3><p>Grave agora ou envie um vídeo da galeria para começar.</p></div>`}
+      <div class="info-block mb-0" style="opacity:.85"><h4>✨ Ou gere com IA a partir da foto do produto</h4>
+        <p class="muted" style="font-size:12px;margin-bottom:10px">Caminho alternativo: criar um vídeo com IA usando a imagem do produto (consome créditos).</p>
+        <button class="btn btn-sm" data-path="gerar">Abrir geração com IA →</button>
+      </div>`;
   }
+  function fmtDur(s) { s = Math.round(s || 0); const m = Math.floor(s / 60), r = s % 60; return String(m).padStart(2, "0") + ":" + String(r).padStart(2, "0"); }
 
   function contentGenerate(c, creatives) {
     const cr = S.get().credits;
@@ -405,7 +435,7 @@ window.CardView = (function () {
     root.querySelectorAll("[data-sim]").forEach((el) => el.onclick = () => U.simulated(el.dataset.sim, "Fluxo salvo no card."));
 
     // Card actions
-    root.querySelectorAll("[data-ca]").forEach((el) => el.onclick = () => cardAction(el.dataset.ca));
+    root.querySelectorAll("[data-ca]").forEach((el) => el.onclick = () => cardAction(el.dataset.ca, el));
   }
 
   function applyMethod(method) {
@@ -462,14 +492,24 @@ window.CardView = (function () {
   }
 
   // Central card action handler
-  function cardAction(a) {
+  function cardAction(a, el2) {
     const c = card();
     const cr = S.get().credits;
+    const a2 = el2 ? el2.dataset.ver : null;
     switch (a) {
       case "iniciar": S.actions.setCardStatus(cardId, "Roteiro"); U.toast("Execução iniciada"); refreshHead(); break;
       case "send-video": S.actions.patchCard(cardId, "content.path", "enviar"); tab = "Conteúdo"; render(); break;
       case "record": S.actions.patchCard(cardId, "content.path", "gravar"); tab = "Conteúdo"; window.Recorder.open(cardId); break;
       case "open-recorder": window.Recorder.open(cardId); break;
+      case "upload-gallery": window.VideoStudio.openUpload(cardId); break;
+      case "view-original": window.VideoStudio.viewOriginal(cardId); break;
+      case "gen-opening": window.VideoStudio.retention(true); break;
+      case "view-edited": window.VideoStudio.openEdited(cardId); break;
+      case "use-version": if (a2) { window.VideoStudio.chooseVersion(cardId, a2); refreshBody(); refreshHead(); } break;
+      case "send-analysis-video":
+        S.actions.setCardStatus(cardId, "Enviado para análise");
+        S.update((s) => { const cc = s.cards.find((x) => x.id === cardId); if (cc.content.creatives[0]) cc.content.creatives[0].status = "Analisado"; });
+        U.toast("Vídeo enviado para análise da IA ✓"); render(); break;
       case "gen-ai": S.actions.patchCard(cardId, "content.path", "gerar"); tab = "Conteúdo"; render(); break;
       case "analyze":
         S.actions.setCardStatus(cardId, "Enviado para análise");

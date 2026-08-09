@@ -237,7 +237,22 @@ window.Recorder = (function () {
   // 3) Revisão + ações pós-gravação
   // ============================================================
   let aiDone = false;
+  // Após finalizar a gravação, entrega ao fluxo unificado do Vídeo do Card
   function renderReview() {
+    stopCamera();
+    const meta = {
+      source: "gravado",
+      fileName: `take-${cardId.slice(-4)}.webm`,
+      duration: recSeconds,
+      size: recordedBlob ? (recordedBlob.size / 1048576).toFixed(1) + " MB" : "—",
+      url: recordedUrl,
+      simulated: simulated,
+    };
+    close(true); // remove o overlay do gravador (silencioso)
+    window.VideoStudio.review(cardId, meta);
+  }
+
+  function renderReviewLegacy() {
     stopCamera(); aiDone = false;
     const dur = mmss(recSeconds);
     const preview = recordedUrl

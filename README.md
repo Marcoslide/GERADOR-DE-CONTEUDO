@@ -59,16 +59,27 @@ Cada card é uma central completa de execução com **9 abas**, sem duplicidade:
 **Resumo · Estratégia · Roteiro · Conteúdo · Checklist · Publicação · Análise · Correção · Arquivos**
 
 - **Estratégia** — Método R.E.A.L. + 21 métodos estratégicos neutros que, ao clicar, aplicam mudanças reais no card (atualizam gancho, roteiro, próxima ação).
-- **Conteúdo** — 3 caminhos: **Gerar com IA** (a partir de foto do produto, com prévia e custo em créditos), **Enviar vídeo** (com análise da IA), **Gravar agora** (estúdio com câmera + teleprompter — veja abaixo).
+- **Conteúdo → Vídeo do Card** — dois caminhos que caem no mesmo fluxo (veja abaixo). Também há o caminho alternativo **Gerar com IA** (a partir de foto do produto, com prévia e custo em créditos).
 
-### Gravar agora (estúdio de gravação)
+### Vídeo do Card
 
-Aba **Conteúdo → Gravar agora**. Simples e focado em **gravar, analisar e corrigir** (não é um editor complexo):
+Aba **Conteúdo → Vídeo do Card**. Dois caminhos, mesmo fluxo — simples, focado em **gravar/enviar → revisar → aprovar → encontrar cena de retenção → gerar abertura inteligente → salvar** (não é um editor complexo):
 
-1. **Checklist rápido** de preparação antes de gravar (cenário, luz, áudio, produto, roteiro).
+**Caminho 1 — Gravar agora** (estúdio com câmera + teleprompter):
+1. **Checklist rápido** de preparação antes de gravar.
 2. **Câmera + teleprompter**: o roteiro do card rola na tela para você ler. O teleprompter é uma sobreposição e **não é gravado no vídeo final** (o vídeo captura só a câmera).
-3. **Controles**: velocidade do texto, tamanho da fonte, contagem regressiva 3‑2‑1, pausar/continuar, reiniciar teleprompter, espelhar, vertical/horizontal, timer com tempo recomendado.
-4. **Depois de gravar**: repetir take, **salvar no card**, **baixar o vídeo** (.webm), **enviar para análise da IA**, **gerar legenda**, **regravar só o gancho**, **regravar só o CTA** e **criar variação**.
+3. **Controles**: velocidade do texto, tamanho da fonte, contagem 3‑2‑1, pausar/continuar, reiniciar, espelhar, vertical/horizontal, timer.
+
+**Caminho 2 — Enviar vídeo da galeria**: upload de MP4, MOV ou WEBM, com prévia, nome, duração e tamanho.
+
+**Fluxo unificado (os dois caminhos):**
+1. **Revisar** o vídeo (assistir) → **Aprovar vídeo** (ou salvar original / gravar novamente / enviar outro / cancelar).
+2. **Análise de retenção**: o sistema procura a melhor cena para abrir o vídeo e sugere trecho (tempo inicial/final), tipo de retenção, motivo, texto na tela e nova estrutura. Botão **Escolher outro trecho** mostra até 3 alternativas.
+3. **Gerar vídeo editado** → cria a versão **Abertura Inteligente** (cena forte no início + texto na tela + legenda automática + CTA), com preview, timeline simplificada e status.
+4. **Vídeo editado pronto**: compara **Original × Abertura Inteligente**, mostra a cena usada e o motivo da IA. Botões: usar versão editada, usar original, gerar outra versão, enviar para análise, salvar no card.
+5. **Versões do vídeo** ficam salvas no card (Original, Abertura Inteligente e variações). Você escolhe qual será usada para publicação.
+
+> No MVP o processamento de vídeo é **simulado** (mock realista baseado na duração, roteiro e tipo do card) — mas todo o fluxo é funcional e as versões ficam salvas no card.
 - **Checklist** — 8 etapas (Preparação, Pessoas, Ambiente, Gravação, Edição, Publicação, Análise, Correção).
 - **Análise → Correção → novo card** — todo aprendizado vira nova execução.
 
@@ -102,7 +113,8 @@ assets/
     store.js            Estado + persistência (localStorage)
     components.js       Modal, toast, chat contextual, helpers
     views.js            As 8 telas
-    recorder.js         Estúdio Gravar agora (câmera + teleprompter)
+    recorder.js         Captura Gravar agora (câmera + teleprompter)
+    video.js            Vídeo do Card: revisar → retenção → abertura inteligente → versões
     card.js             Card detalhado (9 abas)
     app.js              Router, layout, formulários, init
 ```
