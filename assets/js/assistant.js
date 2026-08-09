@@ -318,5 +318,26 @@ window.Assistant = (function () {
   function bestCard(cards) { const done = cards.filter((c) => c.analysis && c.analysis.done && c.analysis.metrics && c.analysis.metrics.views); if (!done.length) return null; return done.sort((a, b) => metricScore(b) - metricScore(a))[0]; }
   function learnPattern(cards) { const types = {}; cards.forEach((c) => types[c.type] = (types[c.type] || 0) + 1); const top = Object.keys(types).sort((a, b) => types[b] - types[a])[0]; return `📚 Padrão: vídeos de <b>${esc(top || "Antes e depois")}</b> vêm performando melhor. Recomendo criar mais variações desse tipo.`; }
 
-  return { getContext, header, greeting, quickButtons, reply, exec, label };
+  // Contexto operacional completo para a IA (roadmap: getAssistantContext)
+  function getAssistantContext() {
+    const ctx = getContext(), st = ctx.st, c = ctx.card, camp = ctx.campaign;
+    const cards = camp ? S.sel.cardsByCampaign(camp.id) : [];
+    return {
+      view: ctx.view,
+      campaign: camp || null,
+      card: c || null,
+      script: (c && c.script) || null,
+      videos: (c && c.video && c.video.versions) || [],
+      analysis: (c && c.analysis) || null,
+      corrections: (c && c.corrections) || [],
+      library: st.library || [],
+      learnings: window.Learning ? window.Learning.buildOperationContext() : {},
+      publicationPlan: camp ? cards.filter((x) => x.publication && x.publication.date).map((x) => ({ card: x.title, date: x.publication.date, time: x.publication.time, channel: x.publication.channel, status: window.PublishEngine.pubStatus(x) })) : [],
+      publicationQueue: camp && window.PublishEngine ? window.PublishEngine.queue(camp.id).map((x) => ({ card: x.title, date: x.publication.date, time: x.publication.time, channel: x.publication.channel })) : [],
+    };
+  }
+
+  const api = { getContext, getAssistantContext, header, greeting, quickButtons, reply, exec, label };
+  window.getAssistantContext = getAssistantContext;
+  return api;
 })();

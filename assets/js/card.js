@@ -971,5 +971,15 @@ window.CardView = (function () {
   function selStatus(val) { return `<select class="select" data-f="status">${S.get().statuses.map((s) => `<option ${s.name === val ? "selected" : ""}>${esc(s.name)}</option>`).join("")}</select>`; }
   function selPrio(val) { return `<select class="select" data-f="priority">${["Alta", "Média", "Baixa"].map((o) => `<option ${o === val ? "selected" : ""}>${esc(o)}</option>`).join("")}</select>`; }
 
-  return { open, current: () => (document.getElementById("modal-overlay") && document.querySelector(".drawer-tabs") ? cardId : null), refresh: () => { const el = document.getElementById("card-tab-body"); if (el) refreshBody(); } };
+  // Aplica uma correção (vinda do Claude ou do mock) como nova versão do roteiro
+  function applyCorrection(id, cor) {
+    if (!cor) return; const cs = cor.correctedScript || cor;
+    if (cs.hook) S.actions.patchCard(id, "script.hook", cs.hook);
+    if (cs.opening) S.actions.patchCard(id, "script.opening", cs.opening);
+    if (cs.cta) S.actions.patchCard(id, "script.cta", cs.cta);
+    if (cs.screenText) S.actions.patchCard(id, "script.screenText", Array.isArray(cs.screenText) ? cs.screenText : [cs.screenText]);
+    S.actions.addCorrection(id, { reason: cor.reason || "Correção", note: cor.diagnosis || "Correção aplicada (nova versão do roteiro).", status: "Aplicada" });
+    const el = document.getElementById("card-tab-body"); if (el && (window.CardView.current && window.CardView.current() === id)) refreshBody();
+  }
+  return { open, applyCorrection, current: () => (document.getElementById("modal-overlay") && document.querySelector(".drawer-tabs") ? cardId : null), refresh: () => { const el = document.getElementById("card-tab-body"); if (el) refreshBody(); } };
 })();

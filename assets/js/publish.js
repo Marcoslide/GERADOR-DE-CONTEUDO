@@ -180,6 +180,10 @@ window.PublishEngine = (function () {
     };
     S.update((s) => { const cc = s.cards.find((x) => x.id === cardId); cc.analysis = { metrics, done: true, summary }; cc.publication.pubStatus = "Em análise"; });
     S.actions.setCardStatus(cardId, "Analisando resultado");
+    // A memória aprende com a publicação (bom horário/canal, o que funcionou/falhou)
+    if (window.Learning && window.Learning.savePublicationLearning) {
+      window.Learning.savePublicationLearning({ cardId, campaignId: c.campaignId, channel: c.publication && c.publication.channel, time: c.publication && c.publication.time, views: metrics.views, retention: metrics.retention, worked: summary.worked, failed: summary.failed, goodTime: summary.goodTime });
+    }
     U.toast("Métricas coletadas (simuladas) ✓ — análise gerada");
   }
 
