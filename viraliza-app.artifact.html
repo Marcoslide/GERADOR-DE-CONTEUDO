@@ -1,12 +1,4 @@
-<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>VIRALIZA — Central de execução de marketing e conteúdo</title>
-  <meta name="description" content="VIRALIZA: crie, teste, analise, corrija e venda. Central de execução de conteúdo para criadores, afiliados, sellers, lojas e agências." />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <style>
+<style>
 /* ============================================================
    R.E.A.L. OS — Design System
    Central de execução de marketing e conteúdo
@@ -675,19 +667,8 @@ body {
 @media (max-width: 640px) { .vs-compare { grid-template-columns: 1fr; } }
 
 </style>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%2310b981'/%3E%3Ctext x='50' y='70' font-size='60' font-family='Arial' font-weight='bold' text-anchor='middle' fill='%23041209'%3EV%3C/text%3E%3C/svg%3E" />
-</head>
-<body>
-  <div class="app">
-    <aside class="sidebar" id="sidebar"></aside>
-    <div class="main">
-      <header class="header" id="header"></header>
-      <main class="content" id="content"></main>
-    </div>
-  </div>
-
-  <!-- Scripts (plain, no build — funciona abrindo o arquivo direto) -->
-  <script>
+<div class="app"><aside class="sidebar" id="sidebar"></aside><div class="main"><header class="header" id="header"></header><main class="content" id="content"></main></div></div>
+<script>
 /* ============================================================
    R.E.A.L. OS — Dados mockados (seed)
    ============================================================ */
@@ -938,7 +919,7 @@ window.SEED = (function () {
 })();
 
 </script>
-  <script>
+<script>
 /* ============================================================
    R.E.A.L. OS — Store (estado + persistência localStorage)
    ============================================================ */
@@ -1103,7 +1084,7 @@ window.Store = (function () {
 })();
 
 </script>
-  <script>
+<script>
 /* ============================================================
    VIRALIZA — Memória Operacional (aprendizado da operação)
    Guarda aprovações, rejeições, edições e performance para o
@@ -1183,7 +1164,7 @@ window.Learning = (function () {
 })();
 
 </script>
-  <script>
+<script>
 /* ============================================================
    VIRALIZA — Camada de IA (simulada, mas funcional)
    Gera dados REAIS no estado do app. Pronta para trocar por
@@ -1502,7 +1483,7 @@ window.AI = (function () {
 })();
 
 </script>
-  <script>
+<script>
 /* ============================================================
    VIRALIZA — Inteligência de Mercado / Pesquisa IA
    Arquitetura de serviços separada, pronta para busca real.
@@ -1747,7 +1728,7 @@ window.MarketResearch = (function () {
 })();
 
 </script>
-  <script>
+<script>
 /* ============================================================
    R.E.A.L. OS — Componentes de UI (modal, toast, chat, helpers)
    ============================================================ */
@@ -1900,7 +1881,7 @@ window.UI = (function () {
 })();
 
 </script>
-  <script>
+<script>
 /* ============================================================
    VIRALIZA — Máquina de Publicação
    Aprovar → Agendar → Publicar → Analisar → Corrigir → Repetir.
@@ -2108,7 +2089,7 @@ window.PublishEngine = (function () {
 })();
 
 </script>
-  <script>
+<script>
 /* ============================================================
    VIRALIZA — Máquina de Variações (Teste de Criativos)
    Um produto → vários ângulos → vários cards reais → testar →
@@ -2229,7 +2210,7 @@ window.VariationMachine = (function () {
 })();
 
 </script>
-  <script>
+<script>
 /* ============================================================
    R.E.A.L. OS — Views (renderização das telas)
    ============================================================ */
@@ -2945,7 +2926,7 @@ window.Views = (function () {
 })();
 
 </script>
-  <script>
+<script>
 /* ============================================================
    VIRALIZA — Vídeo do Card
    Dois caminhos (Gravar agora / Enviar vídeo) → mesmo fluxo:
@@ -3316,7 +3297,7 @@ window.VideoStudio = (function () {
 })();
 
 </script>
-  <script>
+<script>
 /* ============================================================
    VIRALIZA — Gravar agora (câmera + teleprompter)
    O roteiro aparece na tela como sobreposição (teleprompter) e
@@ -3706,7 +3687,7 @@ window.Recorder = (function () {
 })();
 
 </script>
-  <script>
+<script>
 /* ============================================================
    VIRALIZA — Criar campanha com IA (conversacional)
    + Inteligência de Mercado opcional (links, avaliações,
@@ -3959,7 +3940,7 @@ window.CampaignWizard = (function () {
 })();
 
 </script>
-  <script>
+<script>
 /* ============================================================
    VIRALIZA — Card detalhado (5 abas)
    Executar · Roteiro · Conteúdo · Checklist · Análise e Correção
@@ -4937,7 +4918,7 @@ window.CardView = (function () {
 })();
 
 </script>
-  <script>
+<script>
 /* ============================================================
    VIRALIZA — Assistente operacional (agente do sistema)
    Entende contexto (tela/card/campanha), lê o estado, cruza
@@ -5262,7 +5243,7 @@ window.Assistant = (function () {
 })();
 
 </script>
-  <script>
+<script>
 /* ============================================================
    R.E.A.L. OS — App (router, layout, formulários, init)
    ============================================================ */
@@ -5761,5 +5742,3 @@ if (document.readyState === "loading") document.addEventListener("DOMContentLoad
 else window.App.init();
 
 </script>
-</body>
-</html>

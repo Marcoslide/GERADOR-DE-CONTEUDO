@@ -491,4 +491,6 @@ window.App = (function () {
   return { init, render, renderNav, openCard, openIdea, openCampaignForm, openCardForm, openIdeaForm, openPersonaForm, openLibForm, quickAction, generateCards, buyCredits, openCreateMenu, cardMenu, columnMenu, addColumn, libMenu, reuseLibrary, variationMenu, exportData, importData };
 })();
 
-document.addEventListener("DOMContentLoaded", window.App.init);
+// Robusto: inicia mesmo se o DOM já estiver pronto (ex.: artifact/inline)
+if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", window.App.init);
+else window.App.init();
