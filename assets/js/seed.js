@@ -231,9 +231,18 @@ window.SEED = (function () {
     { name: "Gravado", color: "#a3e635" }, { name: "Enviado para análise", color: "#a78bfa" }, { name: "Precisa corrigir", color: "#ef4444" },
     { name: "Em edição", color: "#f59e0b" }, { name: "Aguardando aprovação", color: "#ec4899" }, { name: "Pronto para publicar", color: "#34d399" },
     { name: "Publicado", color: "#10b981" }, { name: "Analisando resultado", color: "#22d3ee" }, { name: "Virou novo teste", color: "#a78bfa" },
-    { name: "Concluído", color: "#62756e" },
+    { name: "Variação criada", color: "#a3e635" }, { name: "Vencedor", color: "#10b981" }, { name: "Concluído", color: "#62756e" },
   ];
 
-  return { persona, ideas, campaigns, cards, library, today, credits, statuses,
+  const integrations = {
+    meta: { status: "desconectado", ig: "", fb: "" },
+    tiktok: { status: "desconectado", note: "" },
+    youtube: { status: "em breve" },
+  };
+
+  const learning = { approvals: [], performance: [], preferences: { approvedHooks: [], rejectedHooks: [], approvedCTAs: [], rejectedReasons: [], preferredTone: "", winningFormats: [], losingFormats: [] } };
+  const ai = { provider: "Modo Simulado", apiKey: "", model: "claude-sonnet-5", temperature: 0.7, maxTokens: 2000, status: "simulado" };
+
+  return { persona, ideas, campaigns, cards, library, today, credits, statuses, integrations, learning, ai,
     user: { id: "user_1", name: "Marcos", email: "marcospereirajpjp@gmail.com", role: "Owner" } };
 })();

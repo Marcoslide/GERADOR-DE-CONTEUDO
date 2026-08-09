@@ -15,6 +15,8 @@ window.UI = (function () {
     "Ativa": "pill-accent", "Planejamento": "pill-blue", "Não publicado": "pill-gray", "Agendado": "pill-blue",
     "Pausado": "pill-amber", "Nova": "pill-blue", "Em análise": "pill-amber", "Boa para campanha": "pill-accent",
     "Virou card": "pill-purple", "Salva para depois": "pill-gray", "Arquivada": "pill-gray",
+    "Rascunho": "pill-gray", "Conteúdo gerado": "pill-blue", "Aprovado": "pill-accent", "Publicando": "pill-purple",
+    "Falha na publicação": "pill-red", "Publicado manualmente": "pill-accent", "Em análise": "pill-blue", "Impulsionado": "pill-amber", "Em anúncio": "pill-amber", "Encerrado": "pill-gray", "Variação criada": "pill-purple",
   };
   const statusPill = (s) => `<span class="pill ${STATUS_PILL[s] || "pill-gray"}"><span class="dot"></span>${esc(s)}</span>`;
   const prioClass = (p) => ({ "Alta": "prio-alta", "Média": "prio-media", "Baixa": "prio-baixa" }[p] || "prio-baixa");
@@ -77,75 +79,48 @@ window.UI = (function () {
   }
 
   // ---------- Chat (contextual) ----------
-  const chatState = { open: false, context: "Assistente global", messages: [], actions: [] };
+  // ============ Assistente operacional (usa window.Assistant) ============
+  const chatState = { open: false, messages: [] };
 
-  const DEFAULT_ACTIONS = ["Salvar como ideia", "Criar campanha", "Criar card", "Criar roteiro", "Gerar legenda", "Gerar CTA", "Criar variação", "Salvar na biblioteca"];
+  function ctx() { return window.Assistant ? window.Assistant.getContext() : { view: "hoje" }; }
 
-  function openChat(context, seedMsg, actions) {
+  function openChat() {
     chatState.open = true;
-    chatState.context = context || "Assistente global";
-    chatState.actions = actions || DEFAULT_ACTIONS;
-    if (chatState.messages.length === 0 || context) {
-      chatState.messages = [{ role: "ai", text: seedMsg || "Oi! Sou o assistente do R.E.A.L. OS. Me conta uma ideia, produto ou vídeo que eu transformo em ação.", actions: chatState.actions }];
-    }
+    if (!chatState.messages.length) chatState.messages = [{ role: "ai", text: window.Assistant ? window.Assistant.greeting(ctx()) : "Oi! Sou o Assistente VIRALIZA.", actions: [] }];
     renderChat();
   }
+  // reabre com saudação de contexto (usado por "Assistente do card")
+  function openChatContext() { chatState.open = true; chatState.messages.push({ role: "ai", text: window.Assistant.greeting(ctx()), actions: [] }); renderChat(); }
   function toggleChat() { chatState.open ? (chatState.open = false, renderChat()) : openChat(); }
+
+  function pushAI(res) { if (res && (res.text || (res.actions && res.actions.length))) { if (res.text) chatState.messages.push({ role: "ai", text: res.text, actions: res.actions || [] }); } renderChat(); scrollChat(); }
 
   function chatReply(userText) {
     chatState.messages.push({ role: "user", text: userText });
-    // canned intelligent-ish reply based on keywords
-    const t = userText.toLowerCase();
-    let reply, actions = chatState.actions;
-    if (/gancho|retenção|abertura/.test(t)) {
-      reply = "Aqui vão 3 ganchos com foco em <b>retenção (R)</b>:<br>1. \"Você perde tempo todo dia por causa disso 👇\"<br>2. \"Ninguém te conta esse truque de organização.\"<br>3. \"Testei por 30 dias — olha o resultado.\"<br>Quer que eu aplique um no roteiro?";
-      actions = ["Aplicar no roteiro", "Criar variação", "Salvar na biblioteca", "Criar card"];
-    } else if (/melhorar.*(v[íi]deo|conte[úu]do)|analis/.test(t)) {
-      reply = "Analisei o padrão: o <b>produto costuma aparecer tarde</b>. Recomendo mostrar o produto nos 2 primeiros segundos e repetir o CTA no meio. Isso tende a subir retenção e conversão.";
-      actions = ["Aplicar novo gancho", "Criar card de regravação", "Salvar aprendizado", "Gerar nova legenda", "Criar versão anúncio"];
-    } else if (/legenda|caption/.test(t)) {
-      reply = "Legenda sugerida:<br>\"Chega de perder tampa 😮‍💨 esses potes salvaram minha cozinha. Corre no link da bio! #organização #cozinha\"";
-      actions = ["Aplicar no conteúdo", "Gerar variação", "Salvar na biblioteca"];
-    } else if (/cta/.test(t)) {
-      reply = "CTAs de conversão:<br>• \"Corre no link da bio antes que acabe o frete grátis.\"<br>• \"Toca no link e garante o seu.\"<br>Qual quer usar?";
-      actions = ["Aplicar no conteúdo", "Salvar na biblioteca"];
-    } else if (/campanha|afiliad|produto/.test(t)) {
-      reply = "Boa! Posso montar uma <b>campanha de afiliado</b> com cards prontos: dor e solução, review, comparação, demonstração e prova social. Quer que eu crie?";
-      actions = ["Criar campanha", "Criar card", "Salvar como ideia"];
-    } else {
-      reply = "Entendi. Posso transformar isso em ação agora. O que prefere fazer?";
-      actions = chatState.actions;
-    }
-    setTimeout(() => { chatState.messages.push({ role: "ai", text: reply, actions }); renderChat(); scrollChat(); }, 400);
     renderChat(); scrollChat();
+    // Claude real quando configurado; senão, cérebro simulado (Assistant).
+    if (window.AIProvider && window.AIProvider.isReal()) {
+      chatState.messages.push({ role: "ai", text: "…", actions: [], _typing: true }); renderChat(); scrollChat();
+      window.AIProvider.assistantReply(userText, ctx()).then((res) => {
+        chatState.messages = chatState.messages.filter((m) => !m._typing);
+        if (res.source === "claude") {
+          const n = window.AIProvider.executeActions(res.actions, ctx());
+          const note = (res.learningUsed && res.learningUsed.length) ? `<div class="muted" style="font-size:11px;margin-top:6px">🧠 usei: ${res.learningUsed.map((x) => esc(x)).join(" · ")}</div>` : "";
+          chatState.messages.push({ role: "ai", text: (res.reply || "Feito. ✓") + note, actions: [] });
+          if (n > 0) window.App.render();
+          renderChat(); scrollChat();
+        } else { pushAI({ text: window.Assistant.reply(userText, ctx()).text, actions: window.Assistant.reply(userText, ctx()).actions }); }
+      }).catch(() => { chatState.messages = chatState.messages.filter((m) => !m._typing); const m = window.Assistant.reply(userText, ctx()); pushAI(m); });
+    } else {
+      setTimeout(() => { const res = window.Assistant.reply(userText, ctx()); pushAI(res); }, 300);
+    }
   }
 
-  function handleChatAction(action) {
-    // Route action buttons to real store operations where possible
-    const A = window.Store.actions;
-    if (action === "Salvar como ideia" || action === "Criar tarefa") {
-      const last = [...chatState.messages].reverse().find((m) => m.role === "user");
-      A.addIdea({ title: last ? last.text.slice(0, 60) : "Ideia do chat IA", description: last ? last.text : "", source: "Chat IA", status: "Nova" });
-      toast("Ideia salva ✓"); chatState.messages.push({ role: "ai", text: "Salvei como <b>ideia</b> na sua lista. ✓", actions: chatState.actions });
-    } else if (action === "Criar campanha") {
-      toast("Abrindo nova campanha…"); toggleChat(); window.App.openCampaignForm();
-      return;
-    } else if (action === "Criar card") {
-      toast("Abrindo novo card…"); toggleChat(); window.App.openCardForm();
-      return;
-    } else if (action === "Salvar na biblioteca" || action === "Salvar aprendizado") {
-      const last = [...chatState.messages].reverse().find((m) => m.role === "ai");
-      A.addLibrary({ type: action === "Salvar aprendizado" ? "Aprendizado" : "Gancho vencedor", title: (last ? last.text.replace(/<[^>]+>/g, "").slice(0, 50) : "Item do chat"), content: last ? last.text.replace(/<[^>]+>/g, "") : "" });
-      toast("Salvo na biblioteca ✓"); chatState.messages.push({ role: "ai", text: "Guardado na <b>Biblioteca</b> para reuso. ✓", actions: chatState.actions });
-    } else if (action === "Criar card de regravação") {
-      const id = A.addCard({ title: "Regravação (via chat IA)", type: "Dor e Solução", status: "Precisa corrigir", priority: "Alta", nextAction: "Regravar abertura" });
-      toast("Card de regravação criado ✓"); chatState.messages.push({ role: "ai", text: "Criei um <b>card de regravação</b> no Board. ✓", actions: chatState.actions });
-    } else {
-      // generic acknowledge + apply
-      chatState.messages.push({ role: "ai", text: `Feito: <b>${esc(action)}</b>. ✓ (fluxo aplicado e salvo)`, actions: chatState.actions });
-      toast(action + " ✓");
-    }
-    renderChat(); scrollChat();
+  function runAction(mi, ai) {
+    const a = chatState.messages[mi] && chatState.messages[mi].actions[ai];
+    if (!a) return;
+    const res = window.Assistant.exec(a.act, ctx(), a.payload);
+    pushAI(res);
   }
 
   function scrollChat() { const b = document.querySelector(".chat-body"); if (b) b.scrollTop = b.scrollHeight; }
@@ -153,32 +128,26 @@ window.UI = (function () {
   function renderChat() {
     let root = document.getElementById("chat-root");
     if (!root) { root = document.createElement("div"); root.id = "chat-root"; document.body.appendChild(root); }
-    if (!chatState.open) {
-      root.innerHTML = `<button class="chat-fab" title="Assistente IA">✦</button>`;
-      root.querySelector(".chat-fab").onclick = toggleChat;
-      return;
-    }
-    const msgs = chatState.messages.map((m) => {
+    if (!chatState.open) { root.innerHTML = `<button class="chat-fab" title="Assistente VIRALIZA">✦</button>`; root.querySelector(".chat-fab").onclick = toggleChat; return; }
+    const context = ctx();
+    const msgs = chatState.messages.map((m, mi) => {
       if (m.role === "user") return `<div class="msg user"><div class="m-ava">${initials(window.Store.get().user.name)}</div><div class="m-bubble">${esc(m.text)}</div></div>`;
-      const acts = (m.actions || []).map((a) => `<button class="chip chat-act" data-act="${esc(a)}">${esc(a)}</button>`).join("");
+      const acts = (m.actions || []).map((a, ai) => `<button class="chip chat-act" data-mi="${mi}" data-ai="${ai}">${esc(a.label)}</button>`).join("");
       return `<div class="msg ai"><div class="m-ava">✦</div><div><div class="m-bubble">${m.text}</div>${acts ? `<div class="chat-actions">${acts}</div>` : ""}</div></div>`;
     }).join("");
+    const quick = window.Assistant ? window.Assistant.quickButtons(context) : [];
     root.innerHTML = `
       <div class="chat-panel">
         <div class="chat-head">
           <div class="ch-ai">✦</div>
-          <div style="flex:1"><div class="ch-name">Assistente R.E.A.L.</div><div class="ch-ctx">Contexto: ${esc(chatState.context)}</div></div>
+          <div style="flex:1"><div class="ch-name">Assistente VIRALIZA</div><div class="ch-ctx">${esc(window.Assistant ? window.Assistant.label(context) : "")}</div></div>
           <div class="x-btn" id="chat-close">✕</div>
         </div>
+        ${window.Assistant ? window.Assistant.header(context) : ""}
         <div class="chat-body">${msgs}</div>
-        <div class="chat-suggest">
-          <span class="chip cs" data-s="Me dá 3 ganchos de retenção">3 ganchos</span>
-          <span class="chip cs" data-s="Como melhorar esse vídeo?">Melhorar vídeo</span>
-          <span class="chip cs" data-s="Gera uma legenda vendedora">Legenda</span>
-          <span class="chip cs" data-s="Cria uma campanha de afiliado">Campanha afiliado</span>
-        </div>
+        <div class="chat-suggest">${quick.map(([l, a]) => `<span class="chip cs" data-qact="${esc(a)}">${esc(l)}</span>`).join("")}</div>
         <div class="chat-input">
-          <input id="chat-inp" placeholder="Escreva uma ideia, produto ou pergunta…" autocomplete="off"/>
+          <input id="chat-inp" placeholder="Fale com o Viraliza: “melhora esse roteiro”, “cria 3 vídeos”…" autocomplete="off"/>
           <button class="chat-send" id="chat-send">➤</button>
         </div>
       </div>`;
@@ -187,10 +156,10 @@ window.UI = (function () {
     const send = () => { const v = inp.value.trim(); if (!v) return; inp.value = ""; chatReply(v); };
     root.querySelector("#chat-send").onclick = send;
     inp.addEventListener("keydown", (e) => { if (e.key === "Enter") send(); });
-    root.querySelectorAll(".cs").forEach((c) => c.onclick = () => { inp.value = c.dataset.s; send(); });
-    root.querySelectorAll(".chat-act").forEach((b) => b.onclick = () => handleChatAction(b.dataset.act));
+    root.querySelectorAll(".cs").forEach((c) => c.onclick = () => { const res = window.Assistant.exec(c.dataset.qact, ctx()); pushAI(res); });
+    root.querySelectorAll(".chat-act").forEach((b) => b.onclick = () => runAction(+b.dataset.mi, +b.dataset.ai));
     inp.focus(); scrollChat();
   }
 
-  return { esc, fmt, initials, statusPill, prioClass, toast, modal, closeModal, confirm, simulated, openChat, toggleChat, renderChat, chatState };
+  return { esc, fmt, initials, statusPill, prioClass, toast, modal, closeModal, confirm, simulated, openChat, openChatContext, toggleChat, renderChat, chatState };
 })();

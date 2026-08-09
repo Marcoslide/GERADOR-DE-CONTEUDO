@@ -33,8 +33,8 @@ window.App = (function () {
     const pct = Math.round((st.credits.available / st.credits.total) * 100);
     document.getElementById("sidebar").innerHTML = `
       <div class="brand" data-nav="hoje">
-        <div class="brand-logo">R</div>
-        <div><div class="brand-name">R.E.A.L. OS</div><div class="brand-sub">Execução de conteúdo</div></div>
+        <div class="brand-logo">V</div>
+        <div><div class="brand-name">VIRALIZA</div><div class="brand-sub">Execução de conteúdo</div></div>
       </div>
       <div class="nav">
         <div class="nav-label">Operação</div>${items}
@@ -51,7 +51,7 @@ window.App = (function () {
   function renderHeader() {
     const { view, param } = currentRoute();
     const titles = { hoje: ["Hoje", "sua central de execução"], ideias: ["Ideias", "capture e transforme"], campanhas: ["Campanhas", "estratégia → execução"], campanha: ["Campanha", ""], board: ["Board", "produção de conteúdo"], analise: ["Análise", "performance e correção"], biblioteca: ["Biblioteca", "acervo reutilizável"], persona: ["Persona", "identidade da marca"], config: ["Configurações", ""] };
-    const [t, sub] = titles[view] || ["R.E.A.L. OS", ""];
+    const [t, sub] = titles[view] || ["VIRALIZA", ""];
     document.getElementById("header").innerHTML = `
       <div class="menu-toggle" id="menu-toggle">☰</div>
       <div><h1>${esc(t)}</h1></div><span class="sub">${esc(sub)}</span>
@@ -139,6 +139,8 @@ window.App = (function () {
   const ALL_CHANNELS = ["Instagram", "TikTok", "YouTube Shorts", "Facebook", "WhatsApp", "Marketplace", "Live Shop", "Anúncios"];
 
   function openCampaignForm(id, prefill) {
+    // Nova campanha = fluxo conversacional com IA. Editar = form avançado.
+    if (!id) { window.CampaignWizard.open(prefill); return; }
     const c = id ? S.sel.campaign(id) : Object.assign({ channels: [], type: "Afiliado" }, prefill || {});
     U.modal({
       title: id ? "Editar campanha" : "Nova campanha", size: "wide",
@@ -283,7 +285,13 @@ window.App = (function () {
       case "new-campaign": openCampaignForm(); break;
       case "new-card": openCardForm(); break;
       case "add-priority": U.modal({ title: "Nova prioridade", size: "narrow", body: field("O que fazer hoje?", "pr-text", "") + field("Detalhe", "pr-meta", ""), foot: `<button class="btn btn-ghost" data-close>Cancelar</button><button class="btn btn-primary" id="pr-save">Adicionar</button>`, onMount: (o) => o.querySelector("#pr-save").onclick = () => { const t = o.querySelector("#pr-text").value.trim(); if (!t) return; S.actions.addPriority(t, o.querySelector("#pr-meta").value); U.closeModal(); U.toast("Prioridade adicionada ✓"); } }); break;
-      case "send-video": case "record": case "gen-ai": case "analyze": case "script": {
+      case "record": {
+        const card = S.get().cards.find((c) => !["Concluído", "Publicado"].includes(c.status)) || S.get().cards[0];
+        if (!card) return openCardForm();
+        window.Recorder.open(card.id);
+        break;
+      }
+      case "send-video": case "gen-ai": case "analyze": case "script": {
         // open first active card on the relevant tab
         const card = S.get().cards.find((c) => !["Concluído", "Publicado"].includes(c.status)) || S.get().cards[0];
         if (!card) return openCardForm();
@@ -302,13 +310,146 @@ window.App = (function () {
 
   function generateCards(campaignId) {
     const camp = S.sel.campaign(campaignId);
-    U.confirm(`A IA vai gerar cards de conteúdo para "${camp.title}" (dor e solução, review, comparação, demonstração, prova social). Continuar?`, () => {
-      const types = camp.type === "Afiliado"
-        ? ["Dor e Solução", "Review", "Comparação", "Demonstração", "Prova social"]
-        : ["Dor e Solução", "Demonstração", "Oferta"];
-      types.forEach((t, i) => S.actions.addCard({ title: `${t} — ${camp.productName || camp.title}`, campaignId, type: t, channel: (camp.channels && camp.channels[i % camp.channels.length]) || "Instagram", status: "Ideia", priority: i === 0 ? "Alta" : "Média", objective: camp.objective, nextAction: "Gerar roteiro", strategy: { promise: camp.promise, cta: camp.cta, offer: camp.offer, audience: camp.audience, pain: camp.dor, emotion: camp.emotion } }));
-      U.toast(`${types.length} cards gerados pela IA ✓`); render();
+    const plan = window.AI.generateCampaignPlan({ text: camp.productName || camp.title, goal: camp.type === "Afiliado" ? "Campanha de afiliado" : "Vender produto", channels: camp.channels, style: camp.style || "Direto e vendedor", audience: camp.audience, quantity: "5 vídeos" });
+    U.confirm(`A IA vai gerar ${plan.cardPlan.length} cards prontos (com roteiro, gancho, cena de retenção, visual, checklist e CTA) para "${camp.title}". Continuar?`, () => {
+      const ids = window.AI.generateCardsForCampaign(camp, plan.cardPlan);
+      U.toast(`${ids.length} cards gerados pela IA ✓`); render();
     }, { yes: "Gerar cards" });
+  }
+
+  // ---------- Biblioteca: menu e reutilizar ----------
+  function libMenu(id) {
+    const l = S.get().library.find((x) => x.id === id);
+    const items = [["reuse", "♻️ Reutilizar"], ["edit", "✏️ Editar"], ["variation", "🧬 Criar variação"], ["copy", "📋 Copiar"], ["delete", "🗑️ Apagar"]];
+    U.modal({
+      title: l.title, size: "narrow",
+      body: `<div class="set-nav">${items.map(([a, t]) => `<div class="set-nav-item" data-lm="${a}" ${a === "delete" ? 'style="color:var(--red)"' : ""}>${t}</div>`).join("")}</div>`,
+      onMount: (o) => o.querySelectorAll("[data-lm]").forEach((el) => el.onclick = () => {
+        const a = el.dataset.lm; U.closeModal();
+        if (a === "reuse") reuseLibrary(id);
+        else if (a === "edit") editLibrary(id);
+        else if (a === "variation") { S.actions.addLibrary({ type: l.type, title: l.title + " (variação)", content: l.content, tags: l.tags }); U.toast("Variação salva na biblioteca ✓"); render(); }
+        else if (a === "copy") { try { navigator.clipboard.writeText(l.title + "\n" + l.content); } catch (e) {} U.toast("Copiado ✓"); }
+        else if (a === "delete") U.confirm("Apagar este item da biblioteca?", () => { S.actions.deleteLibrary(id); U.toast("Item apagado"); render(); }, { danger: true, yes: "Apagar" });
+      }),
+    });
+  }
+
+  function editLibrary(id) {
+    const l = S.get().library.find((x) => x.id === id);
+    U.modal({
+      title: "Editar item", size: "",
+      body: `${field("Título", "el-title", l.title)}${textField("Conteúdo", "el-content", l.content)}${field("Tags", "el-tags", (l.tags || []).join(", "))}`,
+      foot: `<button class="btn btn-ghost" data-close>Cancelar</button><button class="btn btn-primary" id="el-save">Salvar</button>`,
+      onMount: (o) => o.querySelector("#el-save").onclick = () => { S.actions.updateLibrary(id, { title: o.querySelector("#el-title").value, content: o.querySelector("#el-content").value, tags: o.querySelector("#el-tags").value.split(",").map((t) => t.trim()).filter(Boolean) }); U.closeModal(); U.toast("Item atualizado ✓"); render(); },
+    });
+  }
+
+  function reuseLibrary(id) {
+    const l = S.get().library.find((x) => x.id === id);
+    const opts = [["new-card", "🃏 Criar novo card"], ["new-campaign", "🎯 Criar nova campanha"], ["variation", "🧬 Salvar como variação"], ["copy", "📋 Copiar conteúdo"]];
+    U.modal({
+      title: "Reutilizar: " + l.title, size: "narrow",
+      body: `<p class="muted" style="margin-bottom:12px">Como você quer usar este item?</p><div class="set-nav">${opts.map(([a, t]) => `<div class="set-nav-item" data-ru="${a}">${t}</div>`).join("")}</div>`,
+      onMount: (o) => o.querySelectorAll("[data-ru]").forEach((el) => el.onclick = () => {
+        const a = el.dataset.ru; U.closeModal();
+        if (a === "new-card") { const nid = S.actions.addCard({ title: l.title, type: "Conteúdo orgânico", status: "Ideia", nextAction: "Gerar roteiro", script: { hook: l.type.includes("Gancho") ? l.title : "", caption: l.type.includes("Legenda") ? l.content : "", cta: l.type === "CTA" ? l.content : "" } }); U.toast("Card criado a partir da biblioteca ✓"); openCard(nid); }
+        else if (a === "new-campaign") window.CampaignWizard.open({ text: l.title + " — " + l.content });
+        else if (a === "variation") { S.actions.addLibrary({ type: l.type, title: l.title + " (variação)", content: l.content, tags: l.tags }); U.toast("Variação salva ✓"); render(); }
+        else if (a === "copy") { try { navigator.clipboard.writeText(l.title + "\n" + l.content); } catch (e) {} U.toast("Copiado ✓"); }
+      }),
+    });
+  }
+
+  // ---------- Export / Import ----------
+  function exportData() {
+    try {
+      const data = JSON.stringify(S.get(), null, 2);
+      const blob = new Blob([data], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a"); a.href = url; a.download = "viraliza-backup.json"; document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      U.toast("Backup exportado ✓");
+    } catch (e) { U.toast("Falha ao exportar", "warn"); }
+  }
+  function importData() {
+    const inp = document.createElement("input"); inp.type = "file"; inp.accept = "application/json,.json";
+    inp.onchange = () => {
+      const f = inp.files && inp.files[0]; if (!f) return;
+      const r = new FileReader();
+      r.onload = () => { try { const obj = JSON.parse(r.result); if (!obj.cards || !obj.campaigns) throw new Error("inválido"); S.importState(obj); U.toast("Dados importados ✓"); location.hash = "#/hoje"; render(); } catch (e) { U.toast("Arquivo inválido", "warn"); } };
+      r.readAsText(f);
+    };
+    inp.click();
+  }
+
+  // ---------- Máquina de Variações ----------
+  function variationMenu(campaignId) {
+    const camp = S.sel.campaign(campaignId);
+    const STYLES = ["Antes e depois", "Review", "Demonstração", "Prova social", "Resposta a objeção", "Oferta", "Bastidor", "Comparação", "UGC"];
+    let sel = [];
+    U.modal({
+      title: "🧪 Máquina de Variações", size: "",
+      body: `<p class="muted" style="margin-bottom:12px">Teste vários ângulos do mesmo produto para achar o vídeo vencedor. Cada variação vira um card real com cenário, formato, gancho e visual diferentes.</p>
+        <div class="field"><label>Quantidade</label><div class="chip-select" id="vm-qty">${["3", "5", "10", "15", "30"].map((q, i) => `<div class="chip ${q === "5" ? "on" : ""}" data-q="${q}">${q === "30" ? "30 dias" : q}</div>`).join("")}</div></div>
+        <div class="field mb-0"><label>Estilos para testar (opcional)</label><div class="chip-select" id="vm-styles">${STYLES.map((s) => `<div class="chip" data-vs="${esc(s)}">${esc(s)}</div>`).join("")}</div></div>`,
+      foot: `<button class="btn btn-ghost" data-close>Cancelar</button><button class="btn" id="vm-explode">🏆 Explodir vencedor</button><button class="btn btn-primary" id="vm-go">Gerar variações</button>`,
+      onMount: (o) => {
+        let qty = 5;
+        o.querySelectorAll("#vm-qty .chip").forEach((c) => c.onclick = () => { o.querySelectorAll("#vm-qty .chip").forEach((x) => x.classList.remove("on")); c.classList.add("on"); qty = c.dataset.q === "30" ? 30 : +c.dataset.q; });
+        o.querySelectorAll("#vm-styles .chip").forEach((c) => c.onclick = () => { c.classList.toggle("on"); const v = c.dataset.vs; const i = sel.indexOf(v); i >= 0 ? sel.splice(i, 1) : sel.push(v); });
+        o.querySelector("#vm-go").onclick = () => { const ids = window.VariationMachine.generate(camp, qty, { channels: camp.channels, styles: sel }); U.closeModal(); U.toast(`${ids.length} variações criadas + plano de teste ✓`); render(); };
+        o.querySelector("#vm-explode").onclick = () => { const win = window.VariationMachine.markWinner(campaignId); if (!win) return U.toast("Sem métricas para eleger vencedor — insira/colete métricas primeiro", "warn"); const ids = window.VariationMachine.explodeWinner(win.id); U.closeModal(); U.toast(`Vencedor: ${win.title}. ${ids.length} novas variações ✓`); render(); };
+      },
+    });
+  }
+
+  // ---------- Board: menu de card e coluna ----------
+  function cardMenu(id) {
+    const c = S.sel.card(id);
+    const items = [
+      ["open", "📂 Abrir"], ["approve", "✓ Aprovar"], ["schedule", "📅 Agendar"], ["now", "🚀 Publicar agora"],
+      ["duplicate", "📄 Duplicar"], ["variation", "🧬 Criar variação"], ["correction", "🛠️ Criar correção"], ["delete", "🗑️ Apagar"],
+    ];
+    U.modal({
+      title: c.title, size: "narrow",
+      body: `<div class="set-nav">${items.map(([a, l]) => `<div class="set-nav-item" data-cm="${a}" ${a === "delete" ? 'style="color:var(--red)"' : ""}>${l}</div>`).join("")}</div>`,
+      onMount: (o) => o.querySelectorAll("[data-cm]").forEach((el) => el.onclick = () => {
+        const a = el.dataset.cm, PE = window.PublishEngine; U.closeModal();
+        if (a === "open") openCard(id);
+        else if (a === "approve") { PE.approve(id); render(); }
+        else if (a === "schedule") { if (!(c.publication && c.publication.date)) { openCard(id); U.toast("Defina data/hora na aba Publicação"); } else { PE.schedule(id); render(); } }
+        else if (a === "now") { PE.publishNow(id); }
+        else if (a === "duplicate") { S.actions.duplicateCard(id); U.toast("Card duplicado ✓"); render(); }
+        else if (a === "variation") { const nid = S.actions.duplicateCard(id); S.actions.updateCard(nid, { title: c.title + " — Variação", status: "Ideia", nextAction: "Testar variação" }); U.toast("Variação criada ✓"); render(); }
+        else if (a === "correction") { const nid = S.actions.addCard({ title: "Correção — " + c.title, type: c.type, campaignId: c.campaignId, channel: c.channel, status: "Precisa corrigir", priority: "Alta", originCardId: id, correctionReason: "Ajuste geral", nextAction: "Regravar aplicando correção", strategy: Object.assign({}, c.strategy), script: Object.assign({}, c.script) }); U.toast("Card de correção criado ✓"); openCard(nid); }
+        else if (a === "delete") U.confirm("Apagar o card \"" + c.title + "\"?", () => { S.actions.deleteCard(id); U.toast("Card apagado"); render(); }, { danger: true, yes: "Apagar" });
+      }),
+    });
+  }
+
+  function columnMenu(name) {
+    const st = S.get().statuses.find((x) => x.name === name) || { name, color: "#8fa39c" };
+    U.modal({
+      title: "Coluna: " + name, size: "narrow",
+      body: `<div class="field"><label>Nome</label><input class="input" id="col-name" value="${esc(st.name)}"/></div>
+        <div class="field"><label>Cor</label><input type="color" id="col-color" value="${st.color}" style="width:60px;height:40px;border:1px solid var(--border-2);border-radius:8px;background:var(--bg-2)"/></div>`,
+      foot: `<button class="btn btn-danger btn-sm" id="col-del">Apagar coluna</button><span style="flex:1"></span><button class="btn btn-ghost" data-close>Cancelar</button><button class="btn btn-primary" id="col-save">Salvar</button>`,
+      onMount: (o) => {
+        o.querySelector("#col-save").onclick = () => { S.actions.renameStatus(name, o.querySelector("#col-name").value.trim(), o.querySelector("#col-color").value); U.closeModal(); U.toast("Coluna atualizada ✓"); render(); };
+        o.querySelector("#col-del").onclick = () => U.confirm("Apagar a coluna \"" + name + "\"? Os cards vão para outra coluna.", () => { S.actions.deleteStatus(name); U.closeModal(); U.toast("Coluna apagada"); render(); }, { danger: true, yes: "Apagar" });
+      },
+    });
+  }
+
+  function addColumn() {
+    U.modal({
+      title: "Nova coluna", size: "narrow",
+      body: `<div class="field"><label>Nome</label><input class="input" id="nc-name" placeholder="Ex: Revisão final"/></div>
+        <div class="field"><label>Cor</label><input type="color" id="nc-color" value="#10b981" style="width:60px;height:40px;border:1px solid var(--border-2);border-radius:8px;background:var(--bg-2)"/></div>`,
+      foot: `<button class="btn btn-ghost" data-close>Cancelar</button><button class="btn btn-primary" id="nc-ok">Adicionar</button>`,
+      onMount: (o) => o.querySelector("#nc-ok").onclick = () => { const n = o.querySelector("#nc-name").value.trim(); if (!n) return U.toast("Digite um nome", "warn"); S.actions.addStatus(n, o.querySelector("#nc-color").value); U.closeModal(); U.toast("Coluna adicionada ✓"); render(); },
+    });
   }
 
   function buyCredits() {
@@ -347,7 +488,9 @@ window.App = (function () {
     U.renderChat();
   }
 
-  return { init, render, renderNav, openCard, openIdea, openCampaignForm, openCardForm, openIdeaForm, openPersonaForm, openLibForm, quickAction, generateCards, buyCredits, openCreateMenu };
+  return { init, render, renderNav, openCard, openIdea, openCampaignForm, openCardForm, openIdeaForm, openPersonaForm, openLibForm, quickAction, generateCards, buyCredits, openCreateMenu, cardMenu, columnMenu, addColumn, libMenu, reuseLibrary, variationMenu, exportData, importData };
 })();
 
-document.addEventListener("DOMContentLoaded", window.App.init);
+// Robusto: inicia mesmo se o DOM já estiver pronto (ex.: artifact/inline)
+if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", window.App.init);
+else window.App.init();
