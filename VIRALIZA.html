@@ -918,7 +918,13 @@ window.SEED = (function () {
     { name: "Concluído", color: "#62756e" },
   ];
 
-  return { persona, ideas, campaigns, cards, library, today, credits, statuses,
+  const integrations = {
+    meta: { status: "desconectado", ig: "", fb: "" },
+    tiktok: { status: "desconectado", note: "" },
+    youtube: { status: "em breve" },
+  };
+
+  return { persona, ideas, campaigns, cards, library, today, credits, statuses, integrations,
     user: { id: "user_1", name: "Marcos", email: "marcospereirajpjp@gmail.com", role: "Owner" } };
 })();
 
@@ -935,9 +941,14 @@ window.Store = (function () {
   function load() {
     try {
       const raw = localStorage.getItem(KEY);
-      if (raw) { state = JSON.parse(raw); return; }
+      if (raw) { state = JSON.parse(raw); migrate(); return; }
     } catch (e) { /* ignore */ }
     reset();
+  }
+
+  // migração leve: garante campos novos em estados salvos antigos
+  function migrate() {
+    if (!state.integrations) state.integrations = JSON.parse(JSON.stringify(window.SEED.integrations));
   }
 
   function reset() {
@@ -1657,6 +1668,8 @@ window.UI = (function () {
     "Ativa": "pill-accent", "Planejamento": "pill-blue", "Não publicado": "pill-gray", "Agendado": "pill-blue",
     "Pausado": "pill-amber", "Nova": "pill-blue", "Em análise": "pill-amber", "Boa para campanha": "pill-accent",
     "Virou card": "pill-purple", "Salva para depois": "pill-gray", "Arquivada": "pill-gray",
+    "Rascunho": "pill-gray", "Conteúdo gerado": "pill-blue", "Aprovado": "pill-accent", "Publicando": "pill-purple",
+    "Falha na publicação": "pill-red", "Publicado manualmente": "pill-accent", "Em análise": "pill-blue", "Impulsionado": "pill-amber", "Em anúncio": "pill-amber", "Encerrado": "pill-gray", "Variação criada": "pill-purple",
   };
   const statusPill = (s) => `<span class="pill ${STATUS_PILL[s] || "pill-gray"}"><span class="dot"></span>${esc(s)}</span>`;
   const prioClass = (p) => ({ "Alta": "prio-alta", "Média": "prio-media", "Baixa": "prio-baixa" }[p] || "prio-baixa");
@@ -1840,6 +1853,214 @@ window.UI = (function () {
 </script>
   <script>
 /* ============================================================
+   VIRALIZA — Máquina de Publicação
+   Aprovar → Agendar → Publicar → Analisar → Corrigir → Repetir.
+   Padrão seguro: "Automático com aprovação". Publicação em modo
+   simulado no MVP; arquitetura pronta para API real (Meta/TikTok).
+   ============================================================ */
+window.PublishEngine = (function () {
+  const S = window.Store, U = window.UI;
+
+  const MODES = ["Manual", "Agendado com lembrete", "Automático com aprovação", "Automático liberado"];
+  const SLOTS = ["09:00", "18:00", "12:00", "20:00", "15:00", "21:00"];
+
+  const APPROVAL_ITEMS = ["Vídeo revisado", "Legenda aprovada", "Hashtags aprovadas", "CTA aprovado", "Canal definido", "Horário definido", "Capa aprovada", "Direitos de uso confirmados"];
+
+  const DEFAULT_RULES = {
+    approvedOnly: true, requireApproval: true, maxPerDay: 3,
+    allowedHours: "09:00–21:00", allowedDays: "Seg–Dom",
+    pauseOnError: true, pauseOnBadPerformance: true, noRepeat: true, requireMedia: true, requireCaption: true,
+    maxVariationsPerWeek: 3,
+  };
+
+  function today() { return new Date().toISOString().slice(0, 10); }
+  function addDays(base, n) { const d = new Date(base + "T00:00:00"); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10); }
+  function nowTime() { const d = new Date(); return String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0"); }
+
+  // ---------- Estado de publicação do card ----------
+  function pubStatus(card) { return (card.publication && card.publication.pubStatus) || (card.script && (card.script.hook || card.script.mainLine) ? "Conteúdo gerado" : "Rascunho"); }
+  function setPub(cardId, patch) { S.update((s) => { const c = s.cards.find((x) => x.id === cardId); c.publication = Object.assign({}, c.publication, patch); }); }
+  function ensureApproval(card) {
+    if (!card.publication) card.publication = {};
+    if (!card.publication.approval) card.publication.approval = APPROVAL_ITEMS.map((t) => ({ t, done: false }));
+    return card.publication.approval;
+  }
+
+  // ---------- Plano de postagem (distribui cards por dia/hora/canal) ----------
+  function buildPlan(campaign) {
+    const cards = S.sel.cardsByCampaign(campaign.id);
+    const freq = campaign.frequency || 2;
+    const channels = (campaign.channels && campaign.channels.length ? campaign.channels : ["Instagram"]);
+    const startAuto = /Autom/.test(campaign.publishMode || "");
+    cards.forEach((c, i) => {
+      const dayIdx = Math.floor(i / freq);
+      const slot = SLOTS[i % freq];
+      const channel = channels[i % channels.length];
+      const initial = campaign.publishMode === "Manual" ? "Conteúdo gerado"
+        : campaign.publishMode === "Agendado com lembrete" ? "Agendado"
+        : startAuto ? "Aguardando aprovação" : "Conteúdo gerado";
+      setPub(c.id, { channel, date: addDays(today(), dayIdx), time: slot, mode: campaign.publishMode || "Automático com aprovação", pubStatus: initial });
+    });
+    return cards.length;
+  }
+
+  // ---------- Ações ----------
+  function approve(cardId) {
+    const c = S.sel.card(cardId);
+    ensureApproval(c);
+    // marca tudo como aprovado
+    S.update((s) => { const cc = s.cards.find((x) => x.id === cardId); cc.publication.approval.forEach((i) => i.done = true); cc.publication.approved = true; cc.publication.pubStatus = "Aprovado"; });
+    U.toast("Conteúdo aprovado ✓");
+  }
+
+  function schedule(cardId, date, time) {
+    const c = S.sel.card(cardId);
+    const patch = { pubStatus: "Agendado" };
+    if (date) patch.date = date; if (time) patch.time = time;
+    setPub(cardId, patch);
+    U.toast("Publicação agendada ✓");
+  }
+
+  function mockLink(channel) {
+    const id = Math.random().toString(36).slice(2, 10);
+    const map = { "Instagram": "https://instagram.com/p/post_sim_" + id, "TikTok": "https://tiktok.com/@voce/video/" + id, "YouTube Shorts": "https://youtube.com/shorts/" + id, "Facebook": "https://facebook.com/watch/?v=" + id };
+    return map[channel] || "https://viraliza.app/post_sim_" + id;
+  }
+
+  function integrationReady(channel) {
+    const it = S.get().integrations || {};
+    if (/Instagram|Facebook/.test(channel)) return (it.meta && it.meta.status === "conectado");
+    if (/TikTok/.test(channel)) return (it.tiktok && it.tiktok.status === "conectado");
+    return false;
+  }
+
+  // Publica agora (simulado): Publicando → Publicado, gera link, registra histórico
+  function publishNow(cardId, onDone) {
+    const c = S.sel.card(cardId);
+    const real = integrationReady(c.publication && c.publication.channel);
+    setPub(cardId, { pubStatus: "Publicando" });
+    S.actions.setCardStatus(cardId, "Publicado");
+    U.toast(real ? "Publicando…" : "Publicando (modo simulado)…");
+    setTimeout(() => {
+      const link = mockLink(c.publication && c.publication.channel);
+      setPub(cardId, { pubStatus: "Publicado", status: "Publicado", link, publishedAt: today() + " " + nowTime() });
+      addHistory(c.campaignId, cardId, "Publicado" + (real ? "" : " (simulado)"));
+      U.toast("Publicado ✓" + (real ? "" : " (simulado)"));
+      if (onDone) onDone();
+      else window.App.render();
+    }, 1200);
+  }
+
+  function markPublished(cardId, link) {
+    const c = S.sel.card(cardId);
+    setPub(cardId, { pubStatus: "Publicado manualmente", status: "Publicado", link: link || (c.publication && c.publication.link) || "", publishedAt: today() + " " + nowTime() });
+    S.actions.setCardStatus(cardId, "Publicado");
+    addHistory(c.campaignId, cardId, "Publicado manualmente");
+    U.toast("Marcado como publicado ✓");
+  }
+
+  function fail(cardId) { setPub(cardId, { pubStatus: "Falha na publicação" }); addHistory(S.sel.card(cardId).campaignId, cardId, "Falha na publicação"); }
+
+  // Processa a fila (simulado): publica os agendados+aprovados respeitando o modo
+  function processQueue(campaignId) {
+    const camp = S.sel.campaign(campaignId);
+    if (camp.automationPaused) return U.toast("Automação pausada", "warn");
+    const q = queue(campaignId).filter((c) => ["Agendado", "Aprovado"].includes(pubStatus(c)));
+    const eligible = q.filter((c) => {
+      if (camp.publishMode === "Manual") return false;
+      if (/aprova/i.test(camp.publishMode || "") && !(c.publication && c.publication.approved)) return false;
+      return true;
+    });
+    if (!eligible.length) return U.toast("Nada elegível na fila (aprovar primeiro?)", "warn");
+    let i = 0;
+    const step = () => { if (i >= eligible.length) { U.toast(eligible.length + " publicações processadas ✓"); window.App.render(); return; } publishNow(eligible[i].id, () => { i++; step(); }); };
+    step();
+  }
+
+  // ---------- Fila e histórico ----------
+  function queue(campaignId) {
+    return S.sel.cardsByCampaign(campaignId)
+      .filter((c) => c.publication && c.publication.date && !["Publicado", "Publicado manualmente"].includes(pubStatus(c)))
+      .sort((a, b) => ((a.publication.date + a.publication.time) > (b.publication.date + b.publication.time) ? 1 : -1));
+  }
+  function scheduledAll() {
+    return S.get().cards.filter((c) => c.publication && c.publication.date && c.publication.pubStatus).sort((a, b) => ((a.publication.date + (a.publication.time || "")) > (b.publication.date + (b.publication.time || "")) ? 1 : -1));
+  }
+  function dueToday() {
+    const t = today();
+    return S.get().cards.filter((c) => c.publication && c.publication.date === t && !["Publicado", "Publicado manualmente"].includes(pubStatus(c)));
+  }
+
+  function addHistory(campaignId, cardId, action) {
+    S.update((s) => {
+      const camp = s.campaigns.find((x) => x.id === campaignId); if (!camp) return;
+      camp.publishHistory = camp.publishHistory || [];
+      const c = s.cards.find((x) => x.id === cardId);
+      camp.publishHistory.unshift({ date: today(), time: nowTime(), cardId, cardTitle: c ? c.title : "", channel: c && c.publication ? c.publication.channel : "", status: action, link: c && c.publication ? c.publication.link : "", mode: c && c.publication ? c.publication.mode : "", approvedBy: c && c.publication && c.publication.approved ? (c.responsible || "Você") : "" });
+    });
+  }
+
+  // ---------- Automação ----------
+  function toggleAutomationPause(campaignId) {
+    const camp = S.sel.campaign(campaignId);
+    S.actions.updateCampaign(campaignId, { automationPaused: !camp.automationPaused });
+    U.toast(camp.automationPaused ? "Automação retomada" : "Automação pausada");
+  }
+  function cancelQueue(campaignId) {
+    queue(campaignId).forEach((c) => setPub(c.id, { pubStatus: "Conteúdo gerado", date: "", time: "" }));
+    U.toast("Fila cancelada");
+  }
+  function rules(campaign) { return Object.assign({}, DEFAULT_RULES, campaign.automationRules || {}); }
+
+  // ---------- Análise pós-publicação (simulada) ----------
+  function collectMetrics(cardId) {
+    const c = S.sel.card(cardId);
+    const base = 4000 + Math.floor(Math.random() * 60000);
+    const metrics = {
+      views: base, reach: Math.round(base * 0.85), likes: Math.round(base * 0.06), comments: Math.round(base * 0.004),
+      shares: Math.round(base * 0.01), saves: Math.round(base * 0.02), clicks: Math.round(base * 0.015),
+      sales: Math.floor(Math.random() * 30), ctr: (1 + Math.random() * 3).toFixed(1) + "%", retention: (45 + Math.floor(Math.random() * 35)) + "%",
+      cost: "R$ 0", link: c.publication ? c.publication.link : "",
+    };
+    const summary = {
+      worked: "Gancho segurou os primeiros segundos e a prova social gerou salvamentos.",
+      failed: metrics.clicks < base * 0.012 ? "CTA fraco — poucos cliques para o volume de views." : "Poderia reforçar o CTA no meio.",
+      repeat: "Manter o formato e o horário de publicação.",
+      fix: "Mostrar o produto mais cedo e repetir o CTA.",
+      variation: "Testar variação de gancho para outro subpúblico.",
+      goodTime: (c.publication && c.publication.time) ? "Horário " + c.publication.time + " respondeu bem." : "Testar 18h.",
+    };
+    S.update((s) => { const cc = s.cards.find((x) => x.id === cardId); cc.analysis = { metrics, done: true, summary }; cc.publication.pubStatus = "Em análise"; });
+    S.actions.setCardStatus(cardId, "Analisando resultado");
+    U.toast("Métricas coletadas (simuladas) ✓ — análise gerada");
+  }
+
+  // ---------- Integrações ----------
+  function connect(platform, onDone) {
+    S.update((s) => { s.integrations[platform].status = "conectando"; });
+    window.App.render();
+    setTimeout(() => {
+      S.update((s) => {
+        if (platform === "meta") { s.integrations.meta.status = "conectado"; s.integrations.meta.ig = "@sua_conta"; s.integrations.meta.fb = "Sua Página"; }
+        else if (platform === "tiktok") { s.integrations.tiktok.status = "conectado"; s.integrations.tiktok.note = "Publicação via envio para revisão"; }
+      });
+      U.toast((platform === "meta" ? "Meta" : "TikTok") + " conectado (simulado) ✓");
+      if (onDone) onDone(); else window.App.render();
+    }, 1100);
+  }
+  function disconnect(platform) { S.update((s) => { s.integrations[platform].status = "desconectado"; }); U.toast("Desconectado"); }
+
+  return {
+    MODES, SLOTS, APPROVAL_ITEMS, DEFAULT_RULES,
+    pubStatus, setPub, ensureApproval, buildPlan, approve, schedule, publishNow, markPublished, fail,
+    processQueue, queue, scheduledAll, dueToday, addHistory, toggleAutomationPause, cancelQueue, rules,
+    collectMetrics, connect, disconnect, mockLink, integrationReady,
+  };
+})();
+
+</script>
+  <script>
+/* ============================================================
    R.E.A.L. OS — Views (renderização das telas)
    ============================================================ */
 window.Views = (function () {
@@ -1853,8 +2074,8 @@ window.Views = (function () {
   function hoje() {
     const st = S.get();
     const doneP = st.today.priorities.filter((p) => p.done).length;
-    const cardsToday = st.cards.filter((c) => c.date === st.today.priorities && false).length; // placeholder
     const activeCards = st.cards.filter((c) => !["Concluído"].includes(c.status));
+    const pubToday = window.PublishEngine.dueToday();
 
     const quickActions = [
       { ico: "💡", label: "Nova ideia", act: "new-idea" }, { ico: "🎯", label: "Nova campanha", act: "new-campaign" },
@@ -1908,10 +2129,19 @@ window.Views = (function () {
               <div class="st-actions"><button class="btn btn-sm" data-act="add-priority">+ Prioridade</button></div></div>
             <div class="priority-list">${prioHTML}</div>
           </div>
-          <div class="panel panel-pad">
+          <div class="panel panel-pad" style="margin-bottom:16px">
             <div class="section-title"><span class="st-ico">🃏</span><h2>Cards do dia</h2>
               <div class="st-actions"><button class="btn btn-sm" data-nav="board">Ver board →</button></div></div>
             <div class="grid" style="grid-template-columns:1fr 1fr">${cardsHTML}</div>
+          </div>
+          <div class="panel panel-pad">
+            <div class="section-title"><span class="st-ico">📅</span><h2>Publicações de hoje</h2><span class="st-count">${pubToday.length}</span></div>
+            ${pubToday.length ? pubToday.map((x) => `
+              <div class="priority-item" data-open-card="${x.id}">
+                <b style="width:52px;color:var(--accent-2)">${esc((x.publication && x.publication.time) || "—")}</b>
+                <div class="pi-text">${esc(x.title)}<div class="pi-meta">${esc((x.publication && x.publication.channel) || x.channel)} · ${esc(window.PublishEngine.pubStatus(x))}</div></div>
+                ${window.PublishEngine.pubStatus(x) === "Aprovado" || window.PublishEngine.pubStatus(x) === "Agendado" ? `<button class="btn btn-xs btn-primary" data-pubnow="${x.id}">🚀 Publicar</button>` : ""}
+              </div>`).join("") : `<p class="muted" style="font-size:13px">Nada agendado para hoje. Crie uma campanha e aprove conteúdos.</p>`}
           </div>
         </div>
         <div>
@@ -1929,7 +2159,8 @@ window.Views = (function () {
 
   function bindHoje(root) {
     root.querySelectorAll("[data-prio]").forEach((el) => el.onclick = () => { S.actions.togglePriority(el.dataset.prio); });
-    root.querySelectorAll("[data-open-card]").forEach((el) => el.onclick = () => window.App.openCard(el.dataset.openCard));
+    root.querySelectorAll("[data-open-card]").forEach((el) => el.onclick = (e) => { if (e.target.closest("[data-pubnow]")) return; window.App.openCard(el.dataset.openCard); });
+    root.querySelectorAll("[data-pubnow]").forEach((el) => el.onclick = (e) => { e.stopPropagation(); window.PublishEngine.publishNow(el.dataset.pubnow); });
     root.querySelectorAll("[data-nav]").forEach((el) => el.onclick = () => location.hash = "#/" + el.dataset.nav);
     root.querySelectorAll("[data-act]").forEach((el) => el.onclick = () => window.App.quickAction(el.dataset.act));
   }
@@ -1990,6 +2221,7 @@ window.Views = (function () {
   }
 
   // Campaign detail
+  let campView = "Cards";
   function campanha(id) {
     const c = S.sel.campaign(id);
     if (!c) return emptyState("🎯", "Campanha não encontrada", "");
@@ -2027,6 +2259,8 @@ window.Views = (function () {
         <div class="stat"><div class="s-label">📈 Conversão</div><div class="s-val">${esc(c.metrics.conversion)}</div></div>
       </div>
 
+      <div class="board-tabs">${["Cards", "Publicação", "Histórico"].map((v) => `<div class="board-tab ${v === campView ? "active" : ""}" data-campview="${v}">${v === "Publicação" ? "📅 " : v === "Histórico" ? "📜 " : ""}${v}</div>`).join("")}</div>
+      ${campView === "Publicação" ? pubView(c) : campView === "Histórico" ? histView(c) : `
       <div class="grid" style="grid-template-columns:1fr 1.3fr;align-items:start">
         <div>
           <div class="info-block"><h4>🎯 Estratégia da campanha</h4>
@@ -2035,12 +2269,9 @@ window.Views = (function () {
               <div class="k">Produto</div><div class="v">${esc(c.productName || "—")}</div>
               <div class="k">Oferta</div><div class="v">${esc(c.offer || "—")}</div>
               <div class="k">Público</div><div class="v">${esc(c.audience || "—")}</div>
-              <div class="k">Dor</div><div class="v">${esc(c.dor || "—")}</div>
               <div class="k">Promessa</div><div class="v">${esc(c.promise || "—")}</div>
-              <div class="k">Emoção</div><div class="v">${esc(c.emotion || "—")}</div>
               <div class="k">CTA</div><div class="v">${esc(c.cta || "—")}</div>
-              <div class="k">Objeções</div><div class="v">${esc(c.objections || "—")}</div>
-              <div class="k">Provas</div><div class="v">${esc(c.proofs || "—")}</div>
+              <div class="k">Modo de publicação</div><div class="v"><span class="pill pill-accent">${esc(c.publishMode || "Automático com aprovação")}</span></div>
               <div class="k">Canais</div><div class="v">${(c.channels || []).join(", ")}</div>
             </div></div>
           ${affBlock}
@@ -2050,8 +2281,82 @@ window.Views = (function () {
             <div class="st-actions"><button class="btn btn-sm" data-act="new-card" data-camp="${id}">+ Card</button></div></div>
           <div class="grid" style="grid-template-columns:1fr 1fr">${cardsHTML || emptyState("🃏", "Sem cards", "Gere cards com IA.")}</div>
         </div>
+      </div>`}`;
+  }
+
+  // ---------- Plano + Fila de Publicação ----------
+  function pubView(c) {
+    const PE = window.PublishEngine;
+    const q = PE.queue(c.id);
+    const all = S.sel.cardsByCampaign(c.id).filter((x) => x.publication && x.publication.date);
+    // agrupa por data (plano)
+    const byDate = {};
+    all.forEach((x) => { (byDate[x.publication.date] = byDate[x.publication.date] || []).push(x); });
+    const dias = Object.keys(byDate).sort();
+    const plano = dias.map((d) => `
+      <div class="info-block" style="margin-bottom:10px"><h4 style="margin-bottom:8px">📅 ${esc(fmtDate(d))}</h4>
+        ${byDate[d].sort((a, b) => (a.publication.time > b.publication.time ? 1 : -1)).map((x) => `
+          <div class="flex gap-8 center" style="padding:6px 0;border-bottom:1px solid var(--border)">
+            <b style="width:52px;color:var(--text-0)">${esc(x.publication.time || "—")}</b>
+            <span class="pill pill-gray">${esc(x.publication.channel || x.channel)}</span>
+            <span style="flex:1;cursor:pointer" data-open-card="${x.id}">${esc(x.title)}</span>
+            ${pill(PE.pubStatus(x))}
+          </div>`).join("")}
+      </div>`).join("") || emptyState("📅", "Sem plano ainda", "Gere cards para montar o plano.");
+
+    const modes = PE.MODES.map((m) => `<span class="chip ${m === (c.publishMode || "Automático com aprovação") ? "on" : ""}" data-setmode="${esc(m)}">${esc(m)}</span>`).join("");
+    const filaRows = q.map((x) => `
+      <div class="scene-card" style="padding:12px">
+        <div class="flex gap-8 center wrap"><b style="flex:1;color:var(--text-0);cursor:pointer" data-open-card="${x.id}">${esc(x.title)}</b>${pill(PE.pubStatus(x))}</div>
+        <div class="flex gap-8 center wrap" style="margin-top:8px">
+          <input class="input" type="date" data-qdate="${x.id}" value="${esc(x.publication.date)}" style="max-width:150px"/>
+          <input class="input" type="time" data-qtime="${x.id}" value="${esc(x.publication.time || "")}" style="max-width:110px"/>
+          <select class="select" data-qchan="${x.id}" style="max-width:150px">${["Instagram", "TikTok", "YouTube Shorts", "Facebook", "WhatsApp", "Marketplace", "Anúncios"].map((ch) => `<option ${ch === (x.publication.channel || x.channel) ? "selected" : ""}>${esc(ch)}</option>`).join("")}</select>
+        </div>
+        <div class="flex gap-8 wrap" style="margin-top:8px">
+          ${x.publication.approved ? "" : `<button class="btn btn-xs" data-pub="approve" data-id="${x.id}">✓ Aprovar</button>`}
+          <button class="btn btn-xs" data-pub="schedule" data-id="${x.id}">📅 Agendar</button>
+          <button class="btn btn-xs btn-primary" data-pub="now" data-id="${x.id}">🚀 Publicar agora</button>
+          <button class="btn btn-xs" data-pub="remove" data-id="${x.id}">Remover da fila</button>
+        </div>
+      </div>`).join("") || `<p class="muted" style="font-size:12px">Fila vazia.</p>`;
+
+    return `
+      <div class="grid" style="grid-template-columns:1.1fr 1fr;align-items:start">
+        <div>
+          <div class="section-title"><span class="st-ico">📅</span><h2>Plano de Publicação</h2></div>
+          ${plano}
+        </div>
+        <div>
+          <div class="info-block"><h4>⚙️ Modo de publicação</h4>
+            <div class="chip-select" style="margin-bottom:8px">${modes}</div>
+            <p class="muted" style="font-size:11px">“Automático com aprovação” só publica o que você aprovar. “Automático liberado” é avançado e vem desligado.</p>
+            <div class="flex gap-8 wrap" style="margin-top:10px">
+              <button class="btn btn-xs" data-pub="${c.automationPaused ? "resume" : "pause"}" data-id="${c.id}">${c.automationPaused ? "▶️ Retomar automação" : "⏸️ Pausar automação"}</button>
+              <button class="btn btn-xs" data-pub="process" data-id="${c.id}">⚡ Processar fila agora</button>
+              <button class="btn btn-xs" data-pub="cancel" data-id="${c.id}">Cancelar fila</button>
+            </div>
+            <div class="alert good" style="margin-top:10px"><span class="al-ico">🛡️</span><div class="al-body" style="font-size:11px">Travas: só publica aprovados · máx ${PE.rules(c).maxPerDay}/dia · horários ${esc(PE.rules(c).allowedHours)} · pausa em erro/queda de desempenho. <span class="muted">Publicação em modo simulado. Estrutura pronta para integração real.</span></div></div>
+          </div>
+          <div class="section-title"><span class="st-ico">🗂️</span><h2>Fila de Publicação</h2><span class="st-count">${q.length}</span></div>
+          ${filaRows}
+        </div>
       </div>`;
   }
+
+  function histView(c) {
+    const h = c.publishHistory || [];
+    return `
+      <div class="section-title"><span class="st-ico">📜</span><h2>Histórico de publicações</h2><span class="st-count">${h.length}</span></div>
+      ${h.length ? h.map((e) => `
+        <div class="file-tile" style="margin-bottom:8px">
+          <div class="ft-ico">${/simulado/.test(e.status) ? "🧪" : "✅"}</div>
+          <div style="flex:1"><div class="ft-name">${esc(e.cardTitle)} <span class="pill pill-gray">${esc(e.channel)}</span></div>
+            <div class="ft-meta">${esc(e.date)} ${esc(e.time)} · ${esc(e.mode || "")}${e.approvedBy ? " · aprovado por " + esc(e.approvedBy) : ""} · <a href="#" onclick="return false" class="text-accent">${esc(e.link || "sem link")}</a></div></div>
+          ${pill(e.status.replace(" (simulado)", "") || "Publicado")}
+        </div>`).join("") : emptyState("📜", "Sem publicações ainda", "Publique conteúdos para ver o histórico.")}`;
+  }
+  function fmtDate(d) { try { const dt = new Date(d + "T00:00:00"); return ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"][dt.getDay()] + ", " + d.split("-").reverse().slice(0, 2).join("/"); } catch (e) { return d; } }
   function bindCampanha(root) {
     root.querySelectorAll("[data-nav]").forEach((el) => el.onclick = () => location.hash = "#/" + el.dataset.nav);
     root.querySelectorAll("[data-open-card]").forEach((el) => el.onclick = () => window.App.openCard(el.dataset.openCard));
@@ -2059,6 +2364,23 @@ window.Views = (function () {
     root.querySelectorAll("[data-act='del-campaign']").forEach((el) => el.onclick = () => U.confirm("Excluir esta campanha e seus cards?", () => { S.actions.deleteCampaign(el.dataset.id); U.toast("Campanha excluída"); location.hash = "#/campanhas"; }, { danger: true, yes: "Excluir" }));
     root.querySelectorAll("[data-act='ai-cards']").forEach((el) => el.onclick = () => window.App.generateCards(el.dataset.id));
     root.querySelectorAll("[data-act='new-card']").forEach((el) => el.onclick = () => window.App.openCardForm(el.dataset.camp));
+    // Publicação
+    root.querySelectorAll("[data-campview]").forEach((el) => el.onclick = () => { campView = el.dataset.campview; window.App.render(); });
+    root.querySelectorAll("[data-setmode]").forEach((el) => el.onclick = () => { const id = location.hash.split("/")[2]; S.actions.updateCampaign(id, { publishMode: el.dataset.setmode }); U.toast("Modo: " + el.dataset.setmode); window.App.render(); });
+    root.querySelectorAll("[data-qdate]").forEach((el) => el.onchange = () => S.actions.patchCard(el.dataset.qdate, "publication.date", el.value));
+    root.querySelectorAll("[data-qtime]").forEach((el) => el.onchange = () => S.actions.patchCard(el.dataset.qtime, "publication.time", el.value));
+    root.querySelectorAll("[data-qchan]").forEach((el) => el.onchange = () => S.actions.patchCard(el.dataset.qchan, "publication.channel", el.value));
+    const PE = window.PublishEngine;
+    root.querySelectorAll("[data-pub]").forEach((el) => el.onclick = () => {
+      const id = el.dataset.id, act = el.dataset.pub;
+      if (act === "approve") { PE.approve(id); window.App.render(); }
+      else if (act === "schedule") { PE.schedule(id); window.App.render(); }
+      else if (act === "now") { PE.publishNow(id); }
+      else if (act === "remove") { PE.setPub(id, { pubStatus: "Conteúdo gerado", date: "", time: "" }); U.toast("Removido da fila"); window.App.render(); }
+      else if (act === "pause" || act === "resume") { PE.toggleAutomationPause(id); window.App.render(); }
+      else if (act === "process") { PE.processQueue(id); }
+      else if (act === "cancel") { U.confirm("Cancelar toda a fila desta campanha?", () => { PE.cancelQueue(id); window.App.render(); }, { danger: true, yes: "Cancelar fila" }); }
+    });
   }
 
   // ============================================================
@@ -2102,9 +2424,11 @@ window.Views = (function () {
       <div class="flex" style="align-items:flex-start;gap:6px"><div class="mc-title" style="flex:1">${esc(c.title)}</div><span class="x-btn" data-cardmenu="${c.id}" title="Ações" style="width:24px;height:24px;font-size:13px">⋮</span></div>
       <div class="mc-meta"><span class="pill pill-gray">${esc(c.type)}</span> <span class="pill ${U.prioClass(c.priority)}" style="border-color:transparent;background:transparent;padding-left:0">● ${esc(c.priority)}</span>${c.potential ? ` <span class="pill ${c.potential === "Alto" ? "pill-accent" : c.potential === "Médio" ? "pill-amber" : "pill-gray"}">📈 ${esc(c.potential)}</span>` : ""}</div>
       <div class="mc-foot"><span class="avatar">${U.initials(c.responsible)}</span> ${esc(c.channel)}${camp ? " · " + esc(camp.title.slice(0, 16)) : ""}</div>
+      ${c.publication && c.publication.date ? `<div class="mc-foot" style="margin-top:6px"><span class="pill ${pubPillClass(window.PublishEngine.pubStatus(c))}" style="font-size:10px">${esc(window.PublishEngine.pubStatus(c))}</span> <span class="muted">${esc(c.publication.date.split("-").reverse().slice(0, 2).join("/"))} ${esc(c.publication.time || "")}</span></div>` : ""}
       <div class="mc-progress"><span style="width:${c.progress}%"></span></div>
     </div>`;
   }
+  function pubPillClass(s) { return { "Aprovado": "pill-accent", "Agendado": "pill-blue", "Publicado": "pill-accent", "Publicado manualmente": "pill-accent", "Publicando": "pill-purple", "Aguardando aprovação": "pill-amber", "Falha na publicação": "pill-red", "Em análise": "pill-blue" }[s] || "pill-gray"; }
 
   function calendarView() {
     const st = S.get();
@@ -2329,15 +2653,29 @@ window.Views = (function () {
   }
 
   function integrationsPanel() {
-    const groups = [
-      { name: "Meta", items: ["Instagram", "Facebook", "Reels", "Ads"], ico: "📱" },
-      { name: "Google", items: ["YouTube", "Shorts", "Google Ads", "Google Trends"], ico: "🔍" },
-      { name: "Vídeo IA", items: ["Vídeo rápido", "Vídeo premium", "Vídeo para anúncio", "Vídeo para afiliado"], ico: "✨" },
-    ];
-    return groups.map((g) => `
-      <div class="info-block"><h4>${g.ico} ${esc(g.name)}</h4>
-        ${g.items.map((i) => `<div class="status-row"><div style="flex:1">${esc(i)}</div><span class="pill pill-gray">Não conectado</span><button class="btn btn-xs" data-sim="Integração ${esc(i)}" style="margin-left:10px">Conectar</button></div>`).join("")}
-      </div>`).join("") + `<p class="muted" style="font-size:12px">Você escolhe o objetivo (rápido, premium, anúncio, afiliado) e o sistema decide o provedor por trás.</p>`;
+    const it = S.get().integrations;
+    const stPill = (s) => ({ "conectado": "pill-accent", "conectando": "pill-amber", "erro": "pill-red", "em breve": "pill-gray" }[s] || "pill-gray");
+    return `
+      <div class="alert good" style="margin-bottom:14px"><span class="al-ico">🔌</span><div class="al-body" style="font-size:12px">Publicação automática em <b>modo simulado</b>. Estrutura pronta para integração real. Algumas contas exigem publicação manual ou aprovação final na plataforma.</div></div>
+      <div class="info-block"><h4>📱 Meta (Instagram e Facebook)</h4>
+        <div class="status-row"><span class="status-color" style="background:#3b82f6"></span><div style="flex:1"><b style="color:var(--text-0)">Conta Meta</b><div class="muted" style="font-size:12px">${it.meta.status === "conectado" ? esc(it.meta.ig + " · " + it.meta.fb) : "Instagram + Facebook"}</div></div><span class="pill ${stPill(it.meta.status)}">${esc(it.meta.status)}</span></div>
+        <div class="flex gap-8 wrap mt-16">
+          ${it.meta.status === "conectado"
+            ? `<button class="btn btn-sm" data-intg="test:meta">Testar publicação</button><button class="btn btn-sm" data-intg="sync:meta">Sincronizar posts</button><button class="btn btn-sm btn-danger" data-intg="disc:meta">Desconectar</button>`
+            : `<button class="btn btn-sm btn-primary" data-intg="conn:meta">Conectar Meta</button>`}
+        </div>
+      </div>
+      <div class="info-block"><h4>🎵 TikTok</h4>
+        <div class="status-row"><span class="status-color" style="background:#ec4899"></span><div style="flex:1"><b style="color:var(--text-0)">Conta TikTok</b><div class="muted" style="font-size:12px">${it.tiktok.status === "conectado" ? esc(it.tiktok.note || "Envio para revisão disponível") : "Publicação direta pode exigir envio para revisão"}</div></div><span class="pill ${stPill(it.tiktok.status)}">${esc(it.tiktok.status)}</span></div>
+        <div class="flex gap-8 wrap mt-16">
+          ${it.tiktok.status === "conectado"
+            ? `<button class="btn btn-sm" data-intg="test:tiktok">Testar envio</button><button class="btn btn-sm" data-intg="sync:tiktok">Sincronizar vídeos</button><button class="btn btn-sm btn-danger" data-intg="disc:tiktok">Desconectar</button>`
+            : `<button class="btn btn-sm btn-primary" data-intg="conn:tiktok">Conectar TikTok</button>`}
+        </div>
+      </div>
+      <div class="info-block mb-0"><h4>▶️ YouTube Shorts</h4>
+        <div class="status-row"><span class="status-color" style="background:#ef4444"></span><div style="flex:1"><b style="color:var(--text-0)">YouTube</b><div class="muted" style="font-size:12px">Estrutura preparada para o futuro</div></div><span class="pill pill-gray">em breve</span></div>
+      </div>`;
   }
 
   function statusPanel() {
@@ -2353,6 +2691,13 @@ window.Views = (function () {
   function bindConfig(root) {
     root.querySelectorAll("[data-settab]").forEach((el) => el.onclick = () => { setTab = el.dataset.settab; window.App.render(); });
     root.querySelectorAll("[data-sim]").forEach((el) => el.onclick = () => U.simulated(el.dataset.sim, "Integração preparada para conexão real."));
+    root.querySelectorAll("[data-intg]").forEach((el) => el.onclick = () => {
+      const [act, plat] = el.dataset.intg.split(":"); const PE = window.PublishEngine;
+      if (act === "conn") PE.connect(plat);
+      else if (act === "disc") { PE.disconnect(plat); window.App.render(); }
+      else if (act === "test") U.toast("Teste enviado (simulado) ✓");
+      else if (act === "sync") U.toast("Sincronização concluída (simulado) ✓");
+    });
     root.querySelectorAll("[data-act='buy-credits']").forEach((el) => el.onclick = () => window.App.buyCredits());
     root.querySelectorAll("[data-act='reset-data']").forEach((el) => el.onclick = () => U.confirm("Isso vai apagar suas alterações e restaurar os dados de exemplo. Continuar?", () => { S.reset(); U.toast("Dados restaurados"); location.hash = "#/hoje"; window.App.render(); }, { danger: true, yes: "Restaurar" }));
     const setUser = root.querySelector("[data-setuser]"); if (setUser) setUser.onchange = () => S.update((s) => s.user.name = setUser.value);
@@ -2404,6 +2749,8 @@ window.VideoStudio = (function () {
   function review(cardId, meta) {
     cid = cardId;
     pending = Object.assign({ source: "gravado" }, meta);
+    // Todo vídeo gravado/enviado é salvo automaticamente em "Versões do vídeo".
+    saveOriginal();
     renderReview();
   }
 
@@ -2418,12 +2765,13 @@ window.VideoStudio = (function () {
       if (!f) return;
       const url = URL.createObjectURL(f);
       pending = { source: "enviado", fileName: f.name, size: (f.size / 1048576).toFixed(1) + " MB", url, mime: f.type, duration: 0, simulated: false };
+      const go = () => { saveOriginal(); renderReview(); };
       // tenta ler a duração real
       const probe = document.createElement("video");
       probe.preload = "metadata"; probe.src = url;
-      probe.onloadedmetadata = () => { pending.duration = Math.round(probe.duration) || estimateDuration(); renderReview(); };
-      probe.onerror = () => { pending.duration = estimateDuration(); renderReview(); };
-      setTimeout(() => { if (document.getElementById("vs-overlay")) return; if (pending) { pending.duration = pending.duration || estimateDuration(); renderReview(); } }, 700);
+      probe.onloadedmetadata = () => { pending.duration = Math.round(probe.duration) || estimateDuration(); go(); };
+      probe.onerror = () => { pending.duration = estimateDuration(); go(); };
+      setTimeout(() => { if (document.getElementById("vs-overlay")) return; if (pending) { pending.duration = pending.duration || estimateDuration(); go(); } }, 700);
     };
     inp.click();
   }
@@ -2442,28 +2790,27 @@ window.VideoStudio = (function () {
     shell(isRec ? "Revisar gravação" : "Revisar vídeo enviado", `
       ${player}
       ${metaRows}
-      <div class="alert info" style="margin-top:14px"><span class="al-ico">👀</span><div class="al-body" style="font-size:12px">Assista e aprove. Só depois de <b>Aprovar vídeo</b> o Viraliza analisa a retenção e sugere uma abertura mais forte.</div></div>`,
-      `<button class="btn btn-ghost" data-vs="cancel">Cancelar</button>
+      <div class="alert good" style="margin-top:14px"><span class="al-ico">💾</span><div class="al-body" style="font-size:12px">Original já salvo em <b>Versões do vídeo</b>. Assista e aprove — só depois de <b>Aprovar vídeo</b> o Viraliza monta a abertura inteligente (trecho de retenção + vídeo original).</div></div>`,
+      `<button class="btn btn-ghost" data-vs="cancel">Fechar</button>
        <button class="btn btn-sm" data-vs="${isRec ? "again-rec" : "again-up"}">${isRec ? "↺ Gravar novamente" : "📤 Enviar outro vídeo"}</button>
-       <button class="btn btn-sm" data-vs="save-original">💾 Salvar original no card</button>
        <button class="btn btn-primary" data-vs="approve">✓ Aprovar vídeo</button>`);
   }
 
   function saveOriginal() {
     const m = pending;
+    if (m._savedId) return m._savedId; // idempotente: só salva uma vez por vídeo
     const version = { id: S.uid("ver"), kind: "Original", label: "Original", source: m.source, fileName: m.fileName || ("video-" + cid.slice(-4)), duration: m.duration, size: m.size || "—", createdAt: today(), status: "Salvo" };
+    m._savedId = version.id;
     if (m.url) URLS["orig:" + cid] = m.url;
     S.actions.withVideo(cid, (v, c) => {
       v.original = { id: version.id, source: m.source, fileName: version.fileName, duration: m.duration, size: version.size, createdAt: today() };
-      // substitui Original anterior, se houver
       v.versions = v.versions.filter((x) => x.kind !== "Original");
       v.versions.unshift(version);
       if (!v.chosenVersionId) v.chosenVersionId = version.id;
       c.status = "Gravado";
     });
-    // também registra como criativo (compatibilidade com aba/analise)
     S.actions.addCreative(cid, { type: m.source === "gravado" ? "Vídeo gravado" : "Vídeo enviado", source: m.source === "gravado" ? "Gravação no app" : "Upload da galeria", status: "Original salvo", fileName: version.fileName, creditsUsed: 0 });
-    return version;
+    return version.id;
   }
 
   // ============================================================
@@ -2534,13 +2881,21 @@ window.VideoStudio = (function () {
         <p class="muted" style="margin-top:6px">Colocando a cena forte no início, aplicando texto na tela e legenda automática.</p>
       </div>`, "");
     setTimeout(() => {
+      const dur = (card().video.original ? card().video.original.duration : scene.end) || scene.end;
+      const st = Math.min(scene.start, Math.max(0, dur - 1)), en = Math.min(scene.end, dur);
+      // SEQUÊNCIA REAL: trecho de retenção no início + vídeo original completo depois
+      const sequence = [
+        { label: "Abertura — cena de retenção", start: st, end: en },
+        { label: "Vídeo original completo", start: 0, end: dur },
+      ];
       const version = {
         id: S.uid("ver"), kind: "Abertura Inteligente", label: "Vídeo com Abertura Inteligente", source: "editado",
-        fileName: "abertura-inteligente-" + cid.slice(-4) + ".mp4", duration: (card().video.original ? card().video.original.duration : scene.end) || scene.end,
-        sceneUsed: mmss(scene.start) + " — " + mmss(scene.end), screenText: scene.screenText, aiNote: scene.reason,
-        structure: scene.structure, sceneType: scene.type, createdAt: today(), status: "Vídeo editado gerado",
+        fileName: "abertura-inteligente-" + cid.slice(-4) + ".mp4", duration: (en - st) + dur,
+        sceneUsed: mmss(st) + " — " + mmss(en), screenText: scene.screenText, aiNote: scene.reason,
+        structure: `Trecho de retenção (${mmss(st)}–${mmss(en)}) → Vídeo original completo → CTA`,
+        sequence, sceneType: scene.type, createdAt: today(), status: "Vídeo editado gerado",
       };
-      // a versão editada reaproveita o mesmo blob do original para preview (reordenação é simulada)
+      // preview usa o mesmo blob, mas REORDENA a reprodução (retenção → original), não é cópia
       if (URLS["orig:" + cid]) URLS[version.id] = URLS["orig:" + cid];
       S.actions.withVideo(cid, (v, c) => {
         v.versions = v.versions.filter((x) => x.kind !== "Abertura Inteligente" || false); // mantém histórico? removemos só a anterior de mesmo nome
@@ -2558,30 +2913,53 @@ window.VideoStudio = (function () {
     const v = vid();
     const edited = v.versions.find((x) => x.id === versionId);
     const origUrl = URLS["orig:" + cid];
+    const eUrl = URLS[versionId];
+    const seq = edited.sequence || [];
+    const editedPane = eUrl
+      ? `<div class="rec-stage" style="max-height:46vh">
+          <video id="vs-seq" src="${eUrl}" playsinline style="width:100%;height:100%;object-fit:cover"></video>
+          <div class="rec-hud"><span class="rec-badge" id="vs-seq-phase">▶ Abertura</span></div>
+          <div class="vs-screen-text">“${esc(edited.screenText)}”</div>
+        </div>
+        <button class="btn btn-sm btn-block" id="vs-seq-play" style="margin-top:8px">▶ Reproduzir sequência (retenção → original)</button>`
+      : playerHTML(eUrl, true, mmss(edited.duration), edited.screenText);
     shell("Vídeo editado pronto", `
       <div class="vs-compare">
-        <div>
-          <div class="vs-tag">Original</div>
-          ${playerHTML(origUrl, !origUrl, mmss(v.original ? v.original.duration : 0))}
-        </div>
-        <div>
-          <div class="vs-tag text-accent">✨ Abertura Inteligente</div>
-          ${playerHTML(URLS[versionId], !URLS[versionId], mmss(edited.duration), edited.screenText)}
-        </div>
+        <div><div class="vs-tag">Original</div>${playerHTML(origUrl, !origUrl, mmss(v.original ? v.original.duration : 0))}</div>
+        <div><div class="vs-tag text-accent">✨ Abertura Inteligente</div>${editedPane}</div>
       </div>
       <div class="info-block" style="margin-top:16px"><h4>🎬 O que a IA fez</h4>
         <div class="kv">
-          <div class="k">Cena usada na abertura</div><div class="v">${esc(edited.sceneUsed)} <span class="pill pill-gray">${esc(edited.sceneType || "")}</span></div>
+          <div class="k">Sequência montada</div><div class="v"><b class="text-accent">Trecho de retenção ${esc(edited.sceneUsed)}</b> → vídeo original completo</div>
           <div class="k">Texto aplicado na tela</div><div class="v">“${esc(edited.screenText)}”</div>
           <div class="k">Motivo da IA</div><div class="v">${esc(edited.aiNote)}</div>
         </div>
-        <div class="vs-timeline">${timelineChips(edited.structure)}</div>
+        <div class="vs-timeline">${seq.map((s, i) => `<span class="vs-scene-chip ${i === 0 ? "strong" : ""}">${i === 0 ? "▶ " : ""}${esc(s.label)}${i === 0 ? ` (${mmss(s.start)}–${mmss(s.end)})` : ""}</span>`).join('<span class="vs-arrow">→</span>')}<span class="vs-arrow">→</span><span class="vs-scene-chip">CTA</span></div>
         <div class="pill pill-accent" style="margin-top:10px">✓ ${esc(edited.status)}</div>
       </div>`,
       `<button class="btn btn-sm" data-vs="use-orig">Usar versão original</button>
        <button class="btn btn-sm" data-vs="gen-other">🔁 Gerar outra versão</button>
        <button class="btn btn-sm" data-vs="send-analysis" data-ver="${versionId}">🔍 Enviar para análise</button>
        <button class="btn btn-primary" data-vs="use-edited" data-ver="${versionId}">✓ Usar versão editada</button>`);
+    const o = document.getElementById("vs-overlay");
+    const el = o && o.querySelector("#vs-seq");
+    if (el) setupSequence(el, seq, o);
+  }
+
+  // Reproduz a sequência: trecho de retenção primeiro, depois o vídeo original completo
+  function setupSequence(el, seq, o) {
+    const phaseEl = o.querySelector("#vs-seq-phase");
+    let phase = 0;
+    const playPhase = (i) => {
+      const s = seq[i]; if (!s) { el.pause(); if (phaseEl) phaseEl.textContent = "✓ fim"; return; }
+      phase = i; try { el.currentTime = s.start || 0; } catch (e) {}
+      if (phaseEl) phaseEl.textContent = (i === 0 ? "▶ " : "") + s.label;
+      el.play().catch(() => {});
+    };
+    el.ontimeupdate = () => { const s = seq[phase]; if (!s) return; if (el.currentTime >= (s.end || el.duration) - 0.08) playPhase(phase + 1); };
+    el.onended = () => playPhase(phase + 1);
+    const btn = o.querySelector("#vs-seq-play"); if (btn) btn.onclick = () => playPhase(0);
+    playPhase(0);
   }
 
   function timelineChips(structure) {
@@ -2748,6 +3126,14 @@ window.Recorder = (function () {
   function open(id) {
     cardId = id;
     resetMedia();
+    // O teleprompter precisa da Fala Principal — se não existir, a IA gera o roteiro antes de gravar.
+    const c = S.sel.card(id);
+    if (window.AI && (!c.script || !c.script.mainLine)) {
+      const camp = S.sel.campaign(c.campaignId) || {};
+      const ns = window.AI.generateScriptForCard(c, camp);
+      S.actions.updateCard(id, { script: Object.assign({}, c.script, ns) });
+      U.toast("Roteiro gerado pela IA para o teleprompter ✓");
+    }
     renderPrep();
   }
 
@@ -3114,9 +3500,12 @@ window.CampaignWizard = (function () {
   const MATERIAL = ["Tenho foto do produto", "Tenho vídeo gravado", "Tenho link de referência", "Tenho link de afiliado", "Tenho só a ideia", "Quero gravar agora"];
   const QUANTITY = ["1 vídeo", "3 vídeos", "5 vídeos", "7 dias de conteúdo", "10 variações"];
   const LINK_TYPES = ["Meu anúncio", "Concorrente", "Produto referência", "Anúncio campeão", "Review", "Página de vendas", "Vídeo de referência", "Conteúdo de rede social"];
+  const FREQ = ["1 post por dia", "2 posts por dia", "3 posts por dia", "Definir depois"];
+  const PUBMODE = ["Manual", "Agendado com lembrete", "Automático com aprovação", "Automático liberado"];
 
   function open(prefill) {
     w = { text: (prefill && prefill.text) || "", goal: "Vender produto", channels: ["Instagram", "TikTok"], style: "Direto e vendedor", material: [], quantity: "3 vídeos", audience: "",
+      frequency: "2 posts por dia", publishMode: "Automático com aprovação",
       showIntel: false, references: [{ url: "", type: "Concorrente" }], pasted: { reviews: "", questions: "", comments: "", description: "", keyword: "" }, research: null };
     renderForm();
   }
@@ -3167,6 +3556,11 @@ window.CampaignWizard = (function () {
           <div class="field"><label>Quantidade</label>${chips(QUANTITY, "quantity", false)}</div>
         </div>
         <div class="field"><label>Público (opcional)</label><input class="input" id="w-aud" value="${esc(w.audience)}" placeholder="Ex: mães que querem decorar a sala"/></div>
+        <div class="form-row">
+          <div class="field"><label>Frequência de publicação</label>${chips(FREQ, "frequency", false)}</div>
+          <div class="field"><label>Modo de publicação</label>${chips(PUBMODE, "publishMode", false)}</div>
+        </div>
+        <p class="muted" style="font-size:11px;margin-top:-6px;margin-bottom:12px">Recomendado: <b>Automático com aprovação</b> (só publica o que você aprovar). “Automático liberado” fica desligado por padrão.</p>
         ${intelSection()}`,
       foot: `<button class="btn btn-ghost" data-close>Cancelar</button><button class="btn btn-primary" id="w-preview">✦ Gerar prévia com IA</button>`,
       onMount: bindForm,
@@ -3298,30 +3692,37 @@ window.CampaignWizard = (function () {
   }
 
   // ---------- Criação ----------
+  function freqNum() { const m = { "1 post por dia": 1, "2 posts por dia": 2, "3 posts por dia": 3 }; return m[w.frequency] || 2; }
+
   function newCampaign() {
     const p = w.plan;
     const id = S.actions.addCampaign({
       title: p.title, type: p.type, objective: p.objective, productName: p.productName, offer: p.offer,
       audience: p.audience, promise: p.promise, emotion: p.emotion, cta: p.cta, channels: p.channels,
-      style: p.style, videosPerDay: 2, status: "Ativa", startDate: new Date().toISOString().slice(0, 10), endDate: "",
+      style: p.style, videosPerDay: freqNum(), frequency: freqNum(), publishMode: w.publishMode,
+      automationRules: Object.assign({}, window.PublishEngine.DEFAULT_RULES, { allowedChannels: p.channels }),
+      automationPaused: false, smartAutomation: false, publishHistory: [],
+      status: "Ativa", startDate: new Date().toISOString().slice(0, 10), endDate: "",
     });
     if (w.research) S.actions.updateCampaign(id, { research: w.research });
     return S.sel.campaign(id);
   }
 
+  function finish(camp, ids) {
+    window.PublishEngine.buildPlan(camp);
+    U.closeModal(); U.toast(`Campanha criada com ${ids.length} cards + plano de publicação ✓`);
+    location.hash = "#/campanha/" + camp.id;
+  }
+
   function create() {
     const camp = newCampaign();
-    const ids = AI.generateCardsForCampaign(camp, w.plan.cardPlan);
-    U.closeModal(); U.toast(`Campanha criada com ${ids.length} cards prontos ✓`);
-    location.hash = "#/campanha/" + camp.id;
+    finish(camp, AI.generateCardsForCampaign(camp, w.plan.cardPlan));
   }
 
   function createFromResearch() {
     w.plan = w.plan || AI.generateCampaignPlan(w);
     const camp = newCampaign();
-    const ids = MR.generateCardsFromResearch(camp, w.research);
-    U.closeModal(); U.toast(`Campanha criada com ${ids.length} cards a partir da inteligência de mercado ✓`);
-    location.hash = "#/campanha/" + camp.id;
+    finish(camp, MR.generateCardsFromResearch(camp, w.research));
   }
 
   return { open };
@@ -3337,7 +3738,7 @@ window.CardView = (function () {
   const S = window.Store, U = window.UI, AI = window.AI, esc = U.esc, fmt = U.fmt, pill = U.statusPill;
   let cardId = null, tab = "Executar";
 
-  const TABS = ["Executar", "Roteiro", "Conteúdo", "Checklist", "Análise e Correção"];
+  const TABS = ["Executar", "Roteiro", "Conteúdo", "Checklist", "Publicação", "Análise e Correção"];
   const METHODS = ["Promessa Forte", "Gancho de Retenção", "Dor e Solução", "Antes e Depois", "Prova Social", "Review", "Demonstração", "Comparação", "Unboxing", "Oferta Clara", "Urgência", "Bastidor de Autoridade", "Resposta a Comentário", "Quebra de Objeção", "Conteúdo de Rua", "Produto no Dia a Dia", "Transformação", "Comunidade e Desejo", "Frases de Corte", "Volume e Distribuição", "Teste de Variações"];
   const METHOD_ICO = { "Promessa Forte": "🎯", "Gancho de Retenção": "🪝", "Dor e Solução": "💢", "Antes e Depois": "🔄", "Prova Social": "👥", "Review": "⭐", "Demonstração": "🧪", "Comparação": "⚖️", "Unboxing": "📦", "Oferta Clara": "🏷️", "Urgência": "⏰", "Bastidor de Autoridade": "🎬", "Resposta a Comentário": "💬", "Quebra de Objeção": "🛡️", "Conteúdo de Rua": "🏙️", "Produto no Dia a Dia": "🏠", "Transformação": "✨", "Comunidade e Desejo": "❤️", "Frases de Corte": "✂️", "Volume e Distribuição": "📡", "Teste de Variações": "🧬" };
 
@@ -3391,8 +3792,54 @@ window.CardView = (function () {
       case "Roteiro": return tRoteiro(c);
       case "Conteúdo": return tConteudo(c);
       case "Checklist": return tChecklist(c);
+      case "Publicação": return tPublicacaoTab(c);
       case "Análise e Correção": return tAnaliseCorrecao(c);
     }
+  }
+
+  // ---------- PUBLICAÇÃO ----------
+  function tPublicacaoTab(c) {
+    const PE = window.PublishEngine;
+    const p = c.publication || {};
+    const st = PE.pubStatus(c);
+    const approval = p.approval || PE.APPROVAL_ITEMS.map((t) => ({ t, done: !!p.approved }));
+    const doneN = approval.filter((i) => i.done).length;
+    const PUB_STATUS = ["Rascunho", "Conteúdo gerado", "Aguardando aprovação", "Aprovado", "Agendado", "Publicando", "Publicado", "Publicado manualmente", "Falha na publicação", "Em análise"];
+    return `
+      <div class="grid grid-2" style="align-items:start">
+        <div>
+          <div class="info-block"><h4>✅ Checklist de aprovação <span class="chk-prog" style="margin-left:auto">${doneN}/${approval.length}</span></h4>
+            ${approval.map((i, ii) => `<div class="chk-item"><div class="chk-box ${i.done ? "done" : ""}" data-appr="${ii}">${i.done ? "✓" : ""}</div><div class="ci-text ${i.done ? "done" : ""}">${esc(i.t)}</div></div>`).join("")}
+            <button class="btn btn-primary btn-sm mt-16" data-ca="pub-approve">✓ Aprovar para publicação</button>
+          </div>
+          <div class="info-block mb-0"><h4>📤 Status</h4>
+            <div class="flex gap-8 center wrap" style="margin-bottom:10px">${pill(st)} ${p.publishedAt ? `<span class="muted">${esc(p.publishedAt)}</span>` : ""}</div>
+            <div class="flex gap-8 wrap">
+              <button class="btn btn-sm" data-ca="pub-schedule">📅 Agendar</button>
+              <button class="btn btn-sm btn-primary" data-ca="pub-now">🚀 Publicar agora</button>
+              <button class="btn btn-sm" data-ca="pub-manual">✍️ Marcar publicado manualmente</button>
+              <button class="btn btn-sm" data-ca="pub-metrics">📊 Coletar métricas</button>
+            </div>
+          </div>
+        </div>
+        <div>
+          <div class="info-block"><h4>🗓️ Agendamento</h4>
+            <div class="kv">
+              <div class="k">Canal</div><div class="v">${selChannel(p.channel || c.channel, "pub.channel")}</div>
+              <div class="k">Data / hora</div><div class="v"><div class="flex gap-8"><input class="input" type="date" data-p="date" value="${esc(p.date || "")}"/><input class="input" type="time" data-p="time" value="${esc(p.time || "")}" style="max-width:120px"/></div></div>
+              <div class="k">Modo</div><div class="v"><span class="pill pill-gray">${esc(p.mode || (S.sel.campaign(c.campaignId) || {}).publishMode || "Automático com aprovação")}</span></div>
+              <div class="k">Status</div><div class="v"><select class="select" data-pubstatus>${PUB_STATUS.map((s) => `<option ${s === st ? "selected" : ""}>${esc(s)}</option>`).join("")}</select></div>
+            </div>
+          </div>
+          <div class="info-block mb-0"><h4>✍️ Conteúdo da publicação</h4>
+            <div class="field"><label>Legenda final</label><textarea class="textarea" data-p="captionFinal">${esc(p.captionFinal || c.script.caption || "")}</textarea></div>
+            <div class="field"><label>Hashtags</label><textarea class="textarea" data-p="hashtagsFinal" style="min-height:50px">${esc(p.hashtagsFinal || c.script.hashtags || "")}</textarea></div>
+            <div class="field"><label>CTA</label><input class="input" data-p="ctaFinal" value="${esc(p.ctaFinal || c.script.cta || "")}"/></div>
+            <div class="field mb-0"><label>🔗 Link publicado</label><input class="input" data-p="link" value="${esc(p.link || "")}" placeholder="Gerado ao publicar (ou cole o seu)"/></div>
+            <div class="flex gap-8 wrap" style="margin-top:12px"><button class="btn btn-xs" data-ca="copy-caption">📋 Copiar legenda</button><button class="btn btn-xs" data-ca="copy-hashtags">📋 Copiar hashtags</button><button class="btn btn-xs" data-sim="Baixar vídeo">⬇️ Baixar vídeo</button></div>
+          </div>
+        </div>
+      </div>`;
   }
 
   // ---------- EXECUTAR (resumo + estratégia IA + visual + ações) ----------
@@ -3894,6 +4341,14 @@ window.CardView = (function () {
     root.querySelectorAll("[data-chkgname]").forEach((el) => { el.setAttribute("contenteditable", "true"); el.onblur = () => { const t = el.innerText.trim(); if (t) S.actions.chkRenameGroup(cardId, +el.dataset.chkgname, t); }; });
     root.querySelectorAll("[data-chkadd]").forEach((el) => el.onkeydown = (e) => { if (e.key === "Enter") { const t = el.value.trim(); if (t) { S.actions.chkAddItem(cardId, +el.dataset.chkadd, t); refreshBody(); } } });
 
+    // Publicação: checklist de aprovação + status
+    root.querySelectorAll("[data-appr]").forEach((el) => el.onclick = () => {
+      const ii = +el.dataset.appr;
+      S.update((s) => { const cc = s.cards.find((x) => x.id === cardId); if (!cc.publication) cc.publication = {}; if (!cc.publication.approval) cc.publication.approval = window.PublishEngine.APPROVAL_ITEMS.map((t) => ({ t, done: false })); cc.publication.approval[ii].done = !cc.publication.approval[ii].done; });
+      refreshBody();
+    });
+    const ps = root.querySelector("[data-pubstatus]"); if (ps) ps.onchange = () => { S.actions.patchCard(cardId, "publication.pubStatus", ps.value); refreshHead(); };
+
     // Content path switch (Gravar agora abre o estúdio direto)
     root.querySelectorAll("[data-path]").forEach((el) => el.onclick = () => { S.actions.patchCard(cardId, "content.path", el.dataset.path || null); refreshBody(); if (el.dataset.path === "gravar") window.Recorder.open(cardId); });
 
@@ -4154,6 +4609,14 @@ window.CardView = (function () {
         U.toast("Variação criada no Board ✓"); break;
       case "published":
         S.actions.setCardStatus(cardId, "Publicado"); S.actions.patchCard(cardId, "publication.status", "Publicado"); U.toast("Marcado como publicado ✓"); refreshHead(); break;
+      case "pub-approve": window.PublishEngine.approve(cardId); refreshBody(); refreshHead(); break;
+      case "pub-schedule": { const p = c.publication || {}; if (!p.date) return U.toast("Defina data e hora primeiro", "warn"); window.PublishEngine.schedule(cardId); refreshBody(); refreshHead(); break; }
+      case "pub-now": window.PublishEngine.publishNow(cardId, () => { render(); }); break;
+      case "pub-manual": {
+        U.modal({ title: "Marcar como publicado", size: "narrow", body: `<div class="field mb-0"><label>Link da publicação (opcional)</label><input class="input" id="pm-link" placeholder="https://instagram.com/p/…"/></div>`, foot: `<button class="btn btn-ghost" data-close>Cancelar</button><button class="btn btn-primary" id="pm-ok">Marcar publicado</button>`, onMount: (o) => o.querySelector("#pm-ok").onclick = () => { window.PublishEngine.markPublished(cardId, o.querySelector("#pm-link").value.trim()); U.closeModal(); refreshBody(); refreshHead(); } });
+        break;
+      }
+      case "pub-metrics": window.PublishEngine.collectMetrics(cardId); tab = "Análise e Correção"; render(); break;
       case "correction": tab = "Análise e Correção"; render(); break;
       case "create-correction": {
         const reason = document.querySelector("#cor-reason").value;
@@ -4562,17 +5025,19 @@ window.App = (function () {
   function cardMenu(id) {
     const c = S.sel.card(id);
     const items = [
-      ["open", "📂 Abrir", "abrir"], ["edit", "✏️ Editar", "editar"], ["duplicate", "📄 Duplicar", "duplicar"],
-      ["variation", "🧬 Criar variação", "variação"], ["correction", "🛠️ Criar correção", "correção"], ["delete", "🗑️ Apagar", "apagar"],
+      ["open", "📂 Abrir"], ["approve", "✓ Aprovar"], ["schedule", "📅 Agendar"], ["now", "🚀 Publicar agora"],
+      ["duplicate", "📄 Duplicar"], ["variation", "🧬 Criar variação"], ["correction", "🛠️ Criar correção"], ["delete", "🗑️ Apagar"],
     ];
     U.modal({
       title: c.title, size: "narrow",
       body: `<div class="set-nav">${items.map(([a, l]) => `<div class="set-nav-item" data-cm="${a}" ${a === "delete" ? 'style="color:var(--red)"' : ""}>${l}</div>`).join("")}</div>`,
       onMount: (o) => o.querySelectorAll("[data-cm]").forEach((el) => el.onclick = () => {
-        const a = el.dataset.cm; U.closeModal();
+        const a = el.dataset.cm, PE = window.PublishEngine; U.closeModal();
         if (a === "open") openCard(id);
-        else if (a === "edit") { openCard(id); }
-        else if (a === "duplicate") { const nid = S.actions.duplicateCard(id); U.toast("Card duplicado ✓"); render(); }
+        else if (a === "approve") { PE.approve(id); render(); }
+        else if (a === "schedule") { if (!(c.publication && c.publication.date)) { openCard(id); U.toast("Defina data/hora na aba Publicação"); } else { PE.schedule(id); render(); } }
+        else if (a === "now") { PE.publishNow(id); }
+        else if (a === "duplicate") { S.actions.duplicateCard(id); U.toast("Card duplicado ✓"); render(); }
         else if (a === "variation") { const nid = S.actions.duplicateCard(id); S.actions.updateCard(nid, { title: c.title + " — Variação", status: "Ideia", nextAction: "Testar variação" }); U.toast("Variação criada ✓"); render(); }
         else if (a === "correction") { const nid = S.actions.addCard({ title: "Correção — " + c.title, type: c.type, campaignId: c.campaignId, channel: c.channel, status: "Precisa corrigir", priority: "Alta", originCardId: id, correctionReason: "Ajuste geral", nextAction: "Regravar aplicando correção", strategy: Object.assign({}, c.strategy), script: Object.assign({}, c.script) }); U.toast("Card de correção criado ✓"); openCard(nid); }
         else if (a === "delete") U.confirm("Apagar o card \"" + c.title + "\"?", () => { S.actions.deleteCard(id); U.toast("Card apagado"); render(); }, { danger: true, yes: "Apagar" });

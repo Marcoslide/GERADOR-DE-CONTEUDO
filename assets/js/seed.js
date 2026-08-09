@@ -234,6 +234,12 @@ window.SEED = (function () {
     { name: "Concluído", color: "#62756e" },
   ];
 
-  return { persona, ideas, campaigns, cards, library, today, credits, statuses,
+  const integrations = {
+    meta: { status: "desconectado", ig: "", fb: "" },
+    tiktok: { status: "desconectado", note: "" },
+    youtube: { status: "em breve" },
+  };
+
+  return { persona, ideas, campaigns, cards, library, today, credits, statuses, integrations,
     user: { id: "user_1", name: "Marcos", email: "marcospereirajpjp@gmail.com", role: "Owner" } };
 })();

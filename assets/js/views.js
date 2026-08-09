@@ -12,8 +12,8 @@ window.Views = (function () {
   function hoje() {
     const st = S.get();
     const doneP = st.today.priorities.filter((p) => p.done).length;
-    const cardsToday = st.cards.filter((c) => c.date === st.today.priorities && false).length; // placeholder
     const activeCards = st.cards.filter((c) => !["Concluído"].includes(c.status));
+    const pubToday = window.PublishEngine.dueToday();
 
     const quickActions = [
       { ico: "💡", label: "Nova ideia", act: "new-idea" }, { ico: "🎯", label: "Nova campanha", act: "new-campaign" },
@@ -67,10 +67,19 @@ window.Views = (function () {
               <div class="st-actions"><button class="btn btn-sm" data-act="add-priority">+ Prioridade</button></div></div>
             <div class="priority-list">${prioHTML}</div>
           </div>
-          <div class="panel panel-pad">
+          <div class="panel panel-pad" style="margin-bottom:16px">
             <div class="section-title"><span class="st-ico">🃏</span><h2>Cards do dia</h2>
               <div class="st-actions"><button class="btn btn-sm" data-nav="board">Ver board →</button></div></div>
             <div class="grid" style="grid-template-columns:1fr 1fr">${cardsHTML}</div>
+          </div>
+          <div class="panel panel-pad">
+            <div class="section-title"><span class="st-ico">📅</span><h2>Publicações de hoje</h2><span class="st-count">${pubToday.length}</span></div>
+            ${pubToday.length ? pubToday.map((x) => `
+              <div class="priority-item" data-open-card="${x.id}">
+                <b style="width:52px;color:var(--accent-2)">${esc((x.publication && x.publication.time) || "—")}</b>
+                <div class="pi-text">${esc(x.title)}<div class="pi-meta">${esc((x.publication && x.publication.channel) || x.channel)} · ${esc(window.PublishEngine.pubStatus(x))}</div></div>
+                ${window.PublishEngine.pubStatus(x) === "Aprovado" || window.PublishEngine.pubStatus(x) === "Agendado" ? `<button class="btn btn-xs btn-primary" data-pubnow="${x.id}">🚀 Publicar</button>` : ""}
+              </div>`).join("") : `<p class="muted" style="font-size:13px">Nada agendado para hoje. Crie uma campanha e aprove conteúdos.</p>`}
           </div>
         </div>
         <div>
@@ -88,7 +97,8 @@ window.Views = (function () {
 
   function bindHoje(root) {
     root.querySelectorAll("[data-prio]").forEach((el) => el.onclick = () => { S.actions.togglePriority(el.dataset.prio); });
-    root.querySelectorAll("[data-open-card]").forEach((el) => el.onclick = () => window.App.openCard(el.dataset.openCard));
+    root.querySelectorAll("[data-open-card]").forEach((el) => el.onclick = (e) => { if (e.target.closest("[data-pubnow]")) return; window.App.openCard(el.dataset.openCard); });
+    root.querySelectorAll("[data-pubnow]").forEach((el) => el.onclick = (e) => { e.stopPropagation(); window.PublishEngine.publishNow(el.dataset.pubnow); });
     root.querySelectorAll("[data-nav]").forEach((el) => el.onclick = () => location.hash = "#/" + el.dataset.nav);
     root.querySelectorAll("[data-act]").forEach((el) => el.onclick = () => window.App.quickAction(el.dataset.act));
   }
@@ -149,6 +159,7 @@ window.Views = (function () {
   }
 
   // Campaign detail
+  let campView = "Cards";
   function campanha(id) {
     const c = S.sel.campaign(id);
     if (!c) return emptyState("🎯", "Campanha não encontrada", "");
@@ -186,6 +197,8 @@ window.Views = (function () {
         <div class="stat"><div class="s-label">📈 Conversão</div><div class="s-val">${esc(c.metrics.conversion)}</div></div>
       </div>
 
+      <div class="board-tabs">${["Cards", "Publicação", "Histórico"].map((v) => `<div class="board-tab ${v === campView ? "active" : ""}" data-campview="${v}">${v === "Publicação" ? "📅 " : v === "Histórico" ? "📜 " : ""}${v}</div>`).join("")}</div>
+      ${campView === "Publicação" ? pubView(c) : campView === "Histórico" ? histView(c) : `
       <div class="grid" style="grid-template-columns:1fr 1.3fr;align-items:start">
         <div>
           <div class="info-block"><h4>🎯 Estratégia da campanha</h4>
@@ -194,12 +207,9 @@ window.Views = (function () {
               <div class="k">Produto</div><div class="v">${esc(c.productName || "—")}</div>
               <div class="k">Oferta</div><div class="v">${esc(c.offer || "—")}</div>
               <div class="k">Público</div><div class="v">${esc(c.audience || "—")}</div>
-              <div class="k">Dor</div><div class="v">${esc(c.dor || "—")}</div>
               <div class="k">Promessa</div><div class="v">${esc(c.promise || "—")}</div>
-              <div class="k">Emoção</div><div class="v">${esc(c.emotion || "—")}</div>
               <div class="k">CTA</div><div class="v">${esc(c.cta || "—")}</div>
-              <div class="k">Objeções</div><div class="v">${esc(c.objections || "—")}</div>
-              <div class="k">Provas</div><div class="v">${esc(c.proofs || "—")}</div>
+              <div class="k">Modo de publicação</div><div class="v"><span class="pill pill-accent">${esc(c.publishMode || "Automático com aprovação")}</span></div>
               <div class="k">Canais</div><div class="v">${(c.channels || []).join(", ")}</div>
             </div></div>
           ${affBlock}
@@ -209,8 +219,82 @@ window.Views = (function () {
             <div class="st-actions"><button class="btn btn-sm" data-act="new-card" data-camp="${id}">+ Card</button></div></div>
           <div class="grid" style="grid-template-columns:1fr 1fr">${cardsHTML || emptyState("🃏", "Sem cards", "Gere cards com IA.")}</div>
         </div>
+      </div>`}`;
+  }
+
+  // ---------- Plano + Fila de Publicação ----------
+  function pubView(c) {
+    const PE = window.PublishEngine;
+    const q = PE.queue(c.id);
+    const all = S.sel.cardsByCampaign(c.id).filter((x) => x.publication && x.publication.date);
+    // agrupa por data (plano)
+    const byDate = {};
+    all.forEach((x) => { (byDate[x.publication.date] = byDate[x.publication.date] || []).push(x); });
+    const dias = Object.keys(byDate).sort();
+    const plano = dias.map((d) => `
+      <div class="info-block" style="margin-bottom:10px"><h4 style="margin-bottom:8px">📅 ${esc(fmtDate(d))}</h4>
+        ${byDate[d].sort((a, b) => (a.publication.time > b.publication.time ? 1 : -1)).map((x) => `
+          <div class="flex gap-8 center" style="padding:6px 0;border-bottom:1px solid var(--border)">
+            <b style="width:52px;color:var(--text-0)">${esc(x.publication.time || "—")}</b>
+            <span class="pill pill-gray">${esc(x.publication.channel || x.channel)}</span>
+            <span style="flex:1;cursor:pointer" data-open-card="${x.id}">${esc(x.title)}</span>
+            ${pill(PE.pubStatus(x))}
+          </div>`).join("")}
+      </div>`).join("") || emptyState("📅", "Sem plano ainda", "Gere cards para montar o plano.");
+
+    const modes = PE.MODES.map((m) => `<span class="chip ${m === (c.publishMode || "Automático com aprovação") ? "on" : ""}" data-setmode="${esc(m)}">${esc(m)}</span>`).join("");
+    const filaRows = q.map((x) => `
+      <div class="scene-card" style="padding:12px">
+        <div class="flex gap-8 center wrap"><b style="flex:1;color:var(--text-0);cursor:pointer" data-open-card="${x.id}">${esc(x.title)}</b>${pill(PE.pubStatus(x))}</div>
+        <div class="flex gap-8 center wrap" style="margin-top:8px">
+          <input class="input" type="date" data-qdate="${x.id}" value="${esc(x.publication.date)}" style="max-width:150px"/>
+          <input class="input" type="time" data-qtime="${x.id}" value="${esc(x.publication.time || "")}" style="max-width:110px"/>
+          <select class="select" data-qchan="${x.id}" style="max-width:150px">${["Instagram", "TikTok", "YouTube Shorts", "Facebook", "WhatsApp", "Marketplace", "Anúncios"].map((ch) => `<option ${ch === (x.publication.channel || x.channel) ? "selected" : ""}>${esc(ch)}</option>`).join("")}</select>
+        </div>
+        <div class="flex gap-8 wrap" style="margin-top:8px">
+          ${x.publication.approved ? "" : `<button class="btn btn-xs" data-pub="approve" data-id="${x.id}">✓ Aprovar</button>`}
+          <button class="btn btn-xs" data-pub="schedule" data-id="${x.id}">📅 Agendar</button>
+          <button class="btn btn-xs btn-primary" data-pub="now" data-id="${x.id}">🚀 Publicar agora</button>
+          <button class="btn btn-xs" data-pub="remove" data-id="${x.id}">Remover da fila</button>
+        </div>
+      </div>`).join("") || `<p class="muted" style="font-size:12px">Fila vazia.</p>`;
+
+    return `
+      <div class="grid" style="grid-template-columns:1.1fr 1fr;align-items:start">
+        <div>
+          <div class="section-title"><span class="st-ico">📅</span><h2>Plano de Publicação</h2></div>
+          ${plano}
+        </div>
+        <div>
+          <div class="info-block"><h4>⚙️ Modo de publicação</h4>
+            <div class="chip-select" style="margin-bottom:8px">${modes}</div>
+            <p class="muted" style="font-size:11px">“Automático com aprovação” só publica o que você aprovar. “Automático liberado” é avançado e vem desligado.</p>
+            <div class="flex gap-8 wrap" style="margin-top:10px">
+              <button class="btn btn-xs" data-pub="${c.automationPaused ? "resume" : "pause"}" data-id="${c.id}">${c.automationPaused ? "▶️ Retomar automação" : "⏸️ Pausar automação"}</button>
+              <button class="btn btn-xs" data-pub="process" data-id="${c.id}">⚡ Processar fila agora</button>
+              <button class="btn btn-xs" data-pub="cancel" data-id="${c.id}">Cancelar fila</button>
+            </div>
+            <div class="alert good" style="margin-top:10px"><span class="al-ico">🛡️</span><div class="al-body" style="font-size:11px">Travas: só publica aprovados · máx ${PE.rules(c).maxPerDay}/dia · horários ${esc(PE.rules(c).allowedHours)} · pausa em erro/queda de desempenho. <span class="muted">Publicação em modo simulado. Estrutura pronta para integração real.</span></div></div>
+          </div>
+          <div class="section-title"><span class="st-ico">🗂️</span><h2>Fila de Publicação</h2><span class="st-count">${q.length}</span></div>
+          ${filaRows}
+        </div>
       </div>`;
   }
+
+  function histView(c) {
+    const h = c.publishHistory || [];
+    return `
+      <div class="section-title"><span class="st-ico">📜</span><h2>Histórico de publicações</h2><span class="st-count">${h.length}</span></div>
+      ${h.length ? h.map((e) => `
+        <div class="file-tile" style="margin-bottom:8px">
+          <div class="ft-ico">${/simulado/.test(e.status) ? "🧪" : "✅"}</div>
+          <div style="flex:1"><div class="ft-name">${esc(e.cardTitle)} <span class="pill pill-gray">${esc(e.channel)}</span></div>
+            <div class="ft-meta">${esc(e.date)} ${esc(e.time)} · ${esc(e.mode || "")}${e.approvedBy ? " · aprovado por " + esc(e.approvedBy) : ""} · <a href="#" onclick="return false" class="text-accent">${esc(e.link || "sem link")}</a></div></div>
+          ${pill(e.status.replace(" (simulado)", "") || "Publicado")}
+        </div>`).join("") : emptyState("📜", "Sem publicações ainda", "Publique conteúdos para ver o histórico.")}`;
+  }
+  function fmtDate(d) { try { const dt = new Date(d + "T00:00:00"); return ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"][dt.getDay()] + ", " + d.split("-").reverse().slice(0, 2).join("/"); } catch (e) { return d; } }
   function bindCampanha(root) {
     root.querySelectorAll("[data-nav]").forEach((el) => el.onclick = () => location.hash = "#/" + el.dataset.nav);
     root.querySelectorAll("[data-open-card]").forEach((el) => el.onclick = () => window.App.openCard(el.dataset.openCard));
@@ -218,6 +302,23 @@ window.Views = (function () {
     root.querySelectorAll("[data-act='del-campaign']").forEach((el) => el.onclick = () => U.confirm("Excluir esta campanha e seus cards?", () => { S.actions.deleteCampaign(el.dataset.id); U.toast("Campanha excluída"); location.hash = "#/campanhas"; }, { danger: true, yes: "Excluir" }));
     root.querySelectorAll("[data-act='ai-cards']").forEach((el) => el.onclick = () => window.App.generateCards(el.dataset.id));
     root.querySelectorAll("[data-act='new-card']").forEach((el) => el.onclick = () => window.App.openCardForm(el.dataset.camp));
+    // Publicação
+    root.querySelectorAll("[data-campview]").forEach((el) => el.onclick = () => { campView = el.dataset.campview; window.App.render(); });
+    root.querySelectorAll("[data-setmode]").forEach((el) => el.onclick = () => { const id = location.hash.split("/")[2]; S.actions.updateCampaign(id, { publishMode: el.dataset.setmode }); U.toast("Modo: " + el.dataset.setmode); window.App.render(); });
+    root.querySelectorAll("[data-qdate]").forEach((el) => el.onchange = () => S.actions.patchCard(el.dataset.qdate, "publication.date", el.value));
+    root.querySelectorAll("[data-qtime]").forEach((el) => el.onchange = () => S.actions.patchCard(el.dataset.qtime, "publication.time", el.value));
+    root.querySelectorAll("[data-qchan]").forEach((el) => el.onchange = () => S.actions.patchCard(el.dataset.qchan, "publication.channel", el.value));
+    const PE = window.PublishEngine;
+    root.querySelectorAll("[data-pub]").forEach((el) => el.onclick = () => {
+      const id = el.dataset.id, act = el.dataset.pub;
+      if (act === "approve") { PE.approve(id); window.App.render(); }
+      else if (act === "schedule") { PE.schedule(id); window.App.render(); }
+      else if (act === "now") { PE.publishNow(id); }
+      else if (act === "remove") { PE.setPub(id, { pubStatus: "Conteúdo gerado", date: "", time: "" }); U.toast("Removido da fila"); window.App.render(); }
+      else if (act === "pause" || act === "resume") { PE.toggleAutomationPause(id); window.App.render(); }
+      else if (act === "process") { PE.processQueue(id); }
+      else if (act === "cancel") { U.confirm("Cancelar toda a fila desta campanha?", () => { PE.cancelQueue(id); window.App.render(); }, { danger: true, yes: "Cancelar fila" }); }
+    });
   }
 
   // ============================================================
@@ -261,9 +362,11 @@ window.Views = (function () {
       <div class="flex" style="align-items:flex-start;gap:6px"><div class="mc-title" style="flex:1">${esc(c.title)}</div><span class="x-btn" data-cardmenu="${c.id}" title="Ações" style="width:24px;height:24px;font-size:13px">⋮</span></div>
       <div class="mc-meta"><span class="pill pill-gray">${esc(c.type)}</span> <span class="pill ${U.prioClass(c.priority)}" style="border-color:transparent;background:transparent;padding-left:0">● ${esc(c.priority)}</span>${c.potential ? ` <span class="pill ${c.potential === "Alto" ? "pill-accent" : c.potential === "Médio" ? "pill-amber" : "pill-gray"}">📈 ${esc(c.potential)}</span>` : ""}</div>
       <div class="mc-foot"><span class="avatar">${U.initials(c.responsible)}</span> ${esc(c.channel)}${camp ? " · " + esc(camp.title.slice(0, 16)) : ""}</div>
+      ${c.publication && c.publication.date ? `<div class="mc-foot" style="margin-top:6px"><span class="pill ${pubPillClass(window.PublishEngine.pubStatus(c))}" style="font-size:10px">${esc(window.PublishEngine.pubStatus(c))}</span> <span class="muted">${esc(c.publication.date.split("-").reverse().slice(0, 2).join("/"))} ${esc(c.publication.time || "")}</span></div>` : ""}
       <div class="mc-progress"><span style="width:${c.progress}%"></span></div>
     </div>`;
   }
+  function pubPillClass(s) { return { "Aprovado": "pill-accent", "Agendado": "pill-blue", "Publicado": "pill-accent", "Publicado manualmente": "pill-accent", "Publicando": "pill-purple", "Aguardando aprovação": "pill-amber", "Falha na publicação": "pill-red", "Em análise": "pill-blue" }[s] || "pill-gray"; }
 
   function calendarView() {
     const st = S.get();
@@ -488,15 +591,29 @@ window.Views = (function () {
   }
 
   function integrationsPanel() {
-    const groups = [
-      { name: "Meta", items: ["Instagram", "Facebook", "Reels", "Ads"], ico: "📱" },
-      { name: "Google", items: ["YouTube", "Shorts", "Google Ads", "Google Trends"], ico: "🔍" },
-      { name: "Vídeo IA", items: ["Vídeo rápido", "Vídeo premium", "Vídeo para anúncio", "Vídeo para afiliado"], ico: "✨" },
-    ];
-    return groups.map((g) => `
-      <div class="info-block"><h4>${g.ico} ${esc(g.name)}</h4>
-        ${g.items.map((i) => `<div class="status-row"><div style="flex:1">${esc(i)}</div><span class="pill pill-gray">Não conectado</span><button class="btn btn-xs" data-sim="Integração ${esc(i)}" style="margin-left:10px">Conectar</button></div>`).join("")}
-      </div>`).join("") + `<p class="muted" style="font-size:12px">Você escolhe o objetivo (rápido, premium, anúncio, afiliado) e o sistema decide o provedor por trás.</p>`;
+    const it = S.get().integrations;
+    const stPill = (s) => ({ "conectado": "pill-accent", "conectando": "pill-amber", "erro": "pill-red", "em breve": "pill-gray" }[s] || "pill-gray");
+    return `
+      <div class="alert good" style="margin-bottom:14px"><span class="al-ico">🔌</span><div class="al-body" style="font-size:12px">Publicação automática em <b>modo simulado</b>. Estrutura pronta para integração real. Algumas contas exigem publicação manual ou aprovação final na plataforma.</div></div>
+      <div class="info-block"><h4>📱 Meta (Instagram e Facebook)</h4>
+        <div class="status-row"><span class="status-color" style="background:#3b82f6"></span><div style="flex:1"><b style="color:var(--text-0)">Conta Meta</b><div class="muted" style="font-size:12px">${it.meta.status === "conectado" ? esc(it.meta.ig + " · " + it.meta.fb) : "Instagram + Facebook"}</div></div><span class="pill ${stPill(it.meta.status)}">${esc(it.meta.status)}</span></div>
+        <div class="flex gap-8 wrap mt-16">
+          ${it.meta.status === "conectado"
+            ? `<button class="btn btn-sm" data-intg="test:meta">Testar publicação</button><button class="btn btn-sm" data-intg="sync:meta">Sincronizar posts</button><button class="btn btn-sm btn-danger" data-intg="disc:meta">Desconectar</button>`
+            : `<button class="btn btn-sm btn-primary" data-intg="conn:meta">Conectar Meta</button>`}
+        </div>
+      </div>
+      <div class="info-block"><h4>🎵 TikTok</h4>
+        <div class="status-row"><span class="status-color" style="background:#ec4899"></span><div style="flex:1"><b style="color:var(--text-0)">Conta TikTok</b><div class="muted" style="font-size:12px">${it.tiktok.status === "conectado" ? esc(it.tiktok.note || "Envio para revisão disponível") : "Publicação direta pode exigir envio para revisão"}</div></div><span class="pill ${stPill(it.tiktok.status)}">${esc(it.tiktok.status)}</span></div>
+        <div class="flex gap-8 wrap mt-16">
+          ${it.tiktok.status === "conectado"
+            ? `<button class="btn btn-sm" data-intg="test:tiktok">Testar envio</button><button class="btn btn-sm" data-intg="sync:tiktok">Sincronizar vídeos</button><button class="btn btn-sm btn-danger" data-intg="disc:tiktok">Desconectar</button>`
+            : `<button class="btn btn-sm btn-primary" data-intg="conn:tiktok">Conectar TikTok</button>`}
+        </div>
+      </div>
+      <div class="info-block mb-0"><h4>▶️ YouTube Shorts</h4>
+        <div class="status-row"><span class="status-color" style="background:#ef4444"></span><div style="flex:1"><b style="color:var(--text-0)">YouTube</b><div class="muted" style="font-size:12px">Estrutura preparada para o futuro</div></div><span class="pill pill-gray">em breve</span></div>
+      </div>`;
   }
 
   function statusPanel() {
@@ -512,6 +629,13 @@ window.Views = (function () {
   function bindConfig(root) {
     root.querySelectorAll("[data-settab]").forEach((el) => el.onclick = () => { setTab = el.dataset.settab; window.App.render(); });
     root.querySelectorAll("[data-sim]").forEach((el) => el.onclick = () => U.simulated(el.dataset.sim, "Integração preparada para conexão real."));
+    root.querySelectorAll("[data-intg]").forEach((el) => el.onclick = () => {
+      const [act, plat] = el.dataset.intg.split(":"); const PE = window.PublishEngine;
+      if (act === "conn") PE.connect(plat);
+      else if (act === "disc") { PE.disconnect(plat); window.App.render(); }
+      else if (act === "test") U.toast("Teste enviado (simulado) ✓");
+      else if (act === "sync") U.toast("Sincronização concluída (simulado) ✓");
+    });
     root.querySelectorAll("[data-act='buy-credits']").forEach((el) => el.onclick = () => window.App.buyCredits());
     root.querySelectorAll("[data-act='reset-data']").forEach((el) => el.onclick = () => U.confirm("Isso vai apagar suas alterações e restaurar os dados de exemplo. Continuar?", () => { S.reset(); U.toast("Dados restaurados"); location.hash = "#/hoje"; window.App.render(); }, { danger: true, yes: "Restaurar" }));
     const setUser = root.querySelector("[data-setuser]"); if (setUser) setUser.onchange = () => S.update((s) => s.user.name = setUser.value);

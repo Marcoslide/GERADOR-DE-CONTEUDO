@@ -15,6 +15,8 @@ window.UI = (function () {
     "Ativa": "pill-accent", "Planejamento": "pill-blue", "Não publicado": "pill-gray", "Agendado": "pill-blue",
     "Pausado": "pill-amber", "Nova": "pill-blue", "Em análise": "pill-amber", "Boa para campanha": "pill-accent",
     "Virou card": "pill-purple", "Salva para depois": "pill-gray", "Arquivada": "pill-gray",
+    "Rascunho": "pill-gray", "Conteúdo gerado": "pill-blue", "Aprovado": "pill-accent", "Publicando": "pill-purple",
+    "Falha na publicação": "pill-red", "Publicado manualmente": "pill-accent", "Em análise": "pill-blue", "Impulsionado": "pill-amber", "Em anúncio": "pill-amber", "Encerrado": "pill-gray", "Variação criada": "pill-purple",
   };
   const statusPill = (s) => `<span class="pill ${STATUS_PILL[s] || "pill-gray"}"><span class="dot"></span>${esc(s)}</span>`;
   const prioClass = (p) => ({ "Alta": "prio-alta", "Média": "prio-media", "Baixa": "prio-baixa" }[p] || "prio-baixa");

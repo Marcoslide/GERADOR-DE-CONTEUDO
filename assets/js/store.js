@@ -9,9 +9,14 @@ window.Store = (function () {
   function load() {
     try {
       const raw = localStorage.getItem(KEY);
-      if (raw) { state = JSON.parse(raw); return; }
+      if (raw) { state = JSON.parse(raw); migrate(); return; }
     } catch (e) { /* ignore */ }
     reset();
+  }
+
+  // migração leve: garante campos novos em estados salvos antigos
+  function migrate() {
+    if (!state.integrations) state.integrations = JSON.parse(JSON.stringify(window.SEED.integrations));
   }
 
   function reset() {

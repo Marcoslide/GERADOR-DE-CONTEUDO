@@ -14,9 +14,12 @@ window.CampaignWizard = (function () {
   const MATERIAL = ["Tenho foto do produto", "Tenho vídeo gravado", "Tenho link de referência", "Tenho link de afiliado", "Tenho só a ideia", "Quero gravar agora"];
   const QUANTITY = ["1 vídeo", "3 vídeos", "5 vídeos", "7 dias de conteúdo", "10 variações"];
   const LINK_TYPES = ["Meu anúncio", "Concorrente", "Produto referência", "Anúncio campeão", "Review", "Página de vendas", "Vídeo de referência", "Conteúdo de rede social"];
+  const FREQ = ["1 post por dia", "2 posts por dia", "3 posts por dia", "Definir depois"];
+  const PUBMODE = ["Manual", "Agendado com lembrete", "Automático com aprovação", "Automático liberado"];
 
   function open(prefill) {
     w = { text: (prefill && prefill.text) || "", goal: "Vender produto", channels: ["Instagram", "TikTok"], style: "Direto e vendedor", material: [], quantity: "3 vídeos", audience: "",
+      frequency: "2 posts por dia", publishMode: "Automático com aprovação",
       showIntel: false, references: [{ url: "", type: "Concorrente" }], pasted: { reviews: "", questions: "", comments: "", description: "", keyword: "" }, research: null };
     renderForm();
   }
@@ -67,6 +70,11 @@ window.CampaignWizard = (function () {
           <div class="field"><label>Quantidade</label>${chips(QUANTITY, "quantity", false)}</div>
         </div>
         <div class="field"><label>Público (opcional)</label><input class="input" id="w-aud" value="${esc(w.audience)}" placeholder="Ex: mães que querem decorar a sala"/></div>
+        <div class="form-row">
+          <div class="field"><label>Frequência de publicação</label>${chips(FREQ, "frequency", false)}</div>
+          <div class="field"><label>Modo de publicação</label>${chips(PUBMODE, "publishMode", false)}</div>
+        </div>
+        <p class="muted" style="font-size:11px;margin-top:-6px;margin-bottom:12px">Recomendado: <b>Automático com aprovação</b> (só publica o que você aprovar). “Automático liberado” fica desligado por padrão.</p>
         ${intelSection()}`,
       foot: `<button class="btn btn-ghost" data-close>Cancelar</button><button class="btn btn-primary" id="w-preview">✦ Gerar prévia com IA</button>`,
       onMount: bindForm,
@@ -198,30 +206,37 @@ window.CampaignWizard = (function () {
   }
 
   // ---------- Criação ----------
+  function freqNum() { const m = { "1 post por dia": 1, "2 posts por dia": 2, "3 posts por dia": 3 }; return m[w.frequency] || 2; }
+
   function newCampaign() {
     const p = w.plan;
     const id = S.actions.addCampaign({
       title: p.title, type: p.type, objective: p.objective, productName: p.productName, offer: p.offer,
       audience: p.audience, promise: p.promise, emotion: p.emotion, cta: p.cta, channels: p.channels,
-      style: p.style, videosPerDay: 2, status: "Ativa", startDate: new Date().toISOString().slice(0, 10), endDate: "",
+      style: p.style, videosPerDay: freqNum(), frequency: freqNum(), publishMode: w.publishMode,
+      automationRules: Object.assign({}, window.PublishEngine.DEFAULT_RULES, { allowedChannels: p.channels }),
+      automationPaused: false, smartAutomation: false, publishHistory: [],
+      status: "Ativa", startDate: new Date().toISOString().slice(0, 10), endDate: "",
     });
     if (w.research) S.actions.updateCampaign(id, { research: w.research });
     return S.sel.campaign(id);
   }
 
+  function finish(camp, ids) {
+    window.PublishEngine.buildPlan(camp);
+    U.closeModal(); U.toast(`Campanha criada com ${ids.length} cards + plano de publicação ✓`);
+    location.hash = "#/campanha/" + camp.id;
+  }
+
   function create() {
     const camp = newCampaign();
-    const ids = AI.generateCardsForCampaign(camp, w.plan.cardPlan);
-    U.closeModal(); U.toast(`Campanha criada com ${ids.length} cards prontos ✓`);
-    location.hash = "#/campanha/" + camp.id;
+    finish(camp, AI.generateCardsForCampaign(camp, w.plan.cardPlan));
   }
 
   function createFromResearch() {
     w.plan = w.plan || AI.generateCampaignPlan(w);
     const camp = newCampaign();
-    const ids = MR.generateCardsFromResearch(camp, w.research);
-    U.closeModal(); U.toast(`Campanha criada com ${ids.length} cards a partir da inteligência de mercado ✓`);
-    location.hash = "#/campanha/" + camp.id;
+    finish(camp, MR.generateCardsFromResearch(camp, w.research));
   }
 
   return { open };

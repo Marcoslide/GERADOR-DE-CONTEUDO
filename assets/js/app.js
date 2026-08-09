@@ -365,17 +365,19 @@ window.App = (function () {
   function cardMenu(id) {
     const c = S.sel.card(id);
     const items = [
-      ["open", "📂 Abrir", "abrir"], ["edit", "✏️ Editar", "editar"], ["duplicate", "📄 Duplicar", "duplicar"],
-      ["variation", "🧬 Criar variação", "variação"], ["correction", "🛠️ Criar correção", "correção"], ["delete", "🗑️ Apagar", "apagar"],
+      ["open", "📂 Abrir"], ["approve", "✓ Aprovar"], ["schedule", "📅 Agendar"], ["now", "🚀 Publicar agora"],
+      ["duplicate", "📄 Duplicar"], ["variation", "🧬 Criar variação"], ["correction", "🛠️ Criar correção"], ["delete", "🗑️ Apagar"],
     ];
     U.modal({
       title: c.title, size: "narrow",
       body: `<div class="set-nav">${items.map(([a, l]) => `<div class="set-nav-item" data-cm="${a}" ${a === "delete" ? 'style="color:var(--red)"' : ""}>${l}</div>`).join("")}</div>`,
       onMount: (o) => o.querySelectorAll("[data-cm]").forEach((el) => el.onclick = () => {
-        const a = el.dataset.cm; U.closeModal();
+        const a = el.dataset.cm, PE = window.PublishEngine; U.closeModal();
         if (a === "open") openCard(id);
-        else if (a === "edit") { openCard(id); }
-        else if (a === "duplicate") { const nid = S.actions.duplicateCard(id); U.toast("Card duplicado ✓"); render(); }
+        else if (a === "approve") { PE.approve(id); render(); }
+        else if (a === "schedule") { if (!(c.publication && c.publication.date)) { openCard(id); U.toast("Defina data/hora na aba Publicação"); } else { PE.schedule(id); render(); } }
+        else if (a === "now") { PE.publishNow(id); }
+        else if (a === "duplicate") { S.actions.duplicateCard(id); U.toast("Card duplicado ✓"); render(); }
         else if (a === "variation") { const nid = S.actions.duplicateCard(id); S.actions.updateCard(nid, { title: c.title + " — Variação", status: "Ideia", nextAction: "Testar variação" }); U.toast("Variação criada ✓"); render(); }
         else if (a === "correction") { const nid = S.actions.addCard({ title: "Correção — " + c.title, type: c.type, campaignId: c.campaignId, channel: c.channel, status: "Precisa corrigir", priority: "Alta", originCardId: id, correctionReason: "Ajuste geral", nextAction: "Regravar aplicando correção", strategy: Object.assign({}, c.strategy), script: Object.assign({}, c.script) }); U.toast("Card de correção criado ✓"); openCard(nid); }
         else if (a === "delete") U.confirm("Apagar o card \"" + c.title + "\"?", () => { S.actions.deleteCard(id); U.toast("Card apagado"); render(); }, { danger: true, yes: "Apagar" });

@@ -24,6 +24,8 @@ window.VideoStudio = (function () {
   function review(cardId, meta) {
     cid = cardId;
     pending = Object.assign({ source: "gravado" }, meta);
+    // Todo vídeo gravado/enviado é salvo automaticamente em "Versões do vídeo".
+    saveOriginal();
     renderReview();
   }
 
@@ -38,12 +40,13 @@ window.VideoStudio = (function () {
       if (!f) return;
       const url = URL.createObjectURL(f);
       pending = { source: "enviado", fileName: f.name, size: (f.size / 1048576).toFixed(1) + " MB", url, mime: f.type, duration: 0, simulated: false };
+      const go = () => { saveOriginal(); renderReview(); };
       // tenta ler a duração real
       const probe = document.createElement("video");
       probe.preload = "metadata"; probe.src = url;
-      probe.onloadedmetadata = () => { pending.duration = Math.round(probe.duration) || estimateDuration(); renderReview(); };
-      probe.onerror = () => { pending.duration = estimateDuration(); renderReview(); };
-      setTimeout(() => { if (document.getElementById("vs-overlay")) return; if (pending) { pending.duration = pending.duration || estimateDuration(); renderReview(); } }, 700);
+      probe.onloadedmetadata = () => { pending.duration = Math.round(probe.duration) || estimateDuration(); go(); };
+      probe.onerror = () => { pending.duration = estimateDuration(); go(); };
+      setTimeout(() => { if (document.getElementById("vs-overlay")) return; if (pending) { pending.duration = pending.duration || estimateDuration(); go(); } }, 700);
     };
     inp.click();
   }
@@ -62,28 +65,27 @@ window.VideoStudio = (function () {
     shell(isRec ? "Revisar gravação" : "Revisar vídeo enviado", `
       ${player}
       ${metaRows}
-      <div class="alert info" style="margin-top:14px"><span class="al-ico">👀</span><div class="al-body" style="font-size:12px">Assista e aprove. Só depois de <b>Aprovar vídeo</b> o Viraliza analisa a retenção e sugere uma abertura mais forte.</div></div>`,
-      `<button class="btn btn-ghost" data-vs="cancel">Cancelar</button>
+      <div class="alert good" style="margin-top:14px"><span class="al-ico">💾</span><div class="al-body" style="font-size:12px">Original já salvo em <b>Versões do vídeo</b>. Assista e aprove — só depois de <b>Aprovar vídeo</b> o Viraliza monta a abertura inteligente (trecho de retenção + vídeo original).</div></div>`,
+      `<button class="btn btn-ghost" data-vs="cancel">Fechar</button>
        <button class="btn btn-sm" data-vs="${isRec ? "again-rec" : "again-up"}">${isRec ? "↺ Gravar novamente" : "📤 Enviar outro vídeo"}</button>
-       <button class="btn btn-sm" data-vs="save-original">💾 Salvar original no card</button>
        <button class="btn btn-primary" data-vs="approve">✓ Aprovar vídeo</button>`);
   }
 
   function saveOriginal() {
     const m = pending;
+    if (m._savedId) return m._savedId; // idempotente: só salva uma vez por vídeo
     const version = { id: S.uid("ver"), kind: "Original", label: "Original", source: m.source, fileName: m.fileName || ("video-" + cid.slice(-4)), duration: m.duration, size: m.size || "—", createdAt: today(), status: "Salvo" };
+    m._savedId = version.id;
     if (m.url) URLS["orig:" + cid] = m.url;
     S.actions.withVideo(cid, (v, c) => {
       v.original = { id: version.id, source: m.source, fileName: version.fileName, duration: m.duration, size: version.size, createdAt: today() };
-      // substitui Original anterior, se houver
       v.versions = v.versions.filter((x) => x.kind !== "Original");
       v.versions.unshift(version);
       if (!v.chosenVersionId) v.chosenVersionId = version.id;
       c.status = "Gravado";
     });
-    // também registra como criativo (compatibilidade com aba/analise)
     S.actions.addCreative(cid, { type: m.source === "gravado" ? "Vídeo gravado" : "Vídeo enviado", source: m.source === "gravado" ? "Gravação no app" : "Upload da galeria", status: "Original salvo", fileName: version.fileName, creditsUsed: 0 });
-    return version;
+    return version.id;
   }
 
   // ============================================================
@@ -154,13 +156,21 @@ window.VideoStudio = (function () {
         <p class="muted" style="margin-top:6px">Colocando a cena forte no início, aplicando texto na tela e legenda automática.</p>
       </div>`, "");
     setTimeout(() => {
+      const dur = (card().video.original ? card().video.original.duration : scene.end) || scene.end;
+      const st = Math.min(scene.start, Math.max(0, dur - 1)), en = Math.min(scene.end, dur);
+      // SEQUÊNCIA REAL: trecho de retenção no início + vídeo original completo depois
+      const sequence = [
+        { label: "Abertura — cena de retenção", start: st, end: en },
+        { label: "Vídeo original completo", start: 0, end: dur },
+      ];
       const version = {
         id: S.uid("ver"), kind: "Abertura Inteligente", label: "Vídeo com Abertura Inteligente", source: "editado",
-        fileName: "abertura-inteligente-" + cid.slice(-4) + ".mp4", duration: (card().video.original ? card().video.original.duration : scene.end) || scene.end,
-        sceneUsed: mmss(scene.start) + " — " + mmss(scene.end), screenText: scene.screenText, aiNote: scene.reason,
-        structure: scene.structure, sceneType: scene.type, createdAt: today(), status: "Vídeo editado gerado",
+        fileName: "abertura-inteligente-" + cid.slice(-4) + ".mp4", duration: (en - st) + dur,
+        sceneUsed: mmss(st) + " — " + mmss(en), screenText: scene.screenText, aiNote: scene.reason,
+        structure: `Trecho de retenção (${mmss(st)}–${mmss(en)}) → Vídeo original completo → CTA`,
+        sequence, sceneType: scene.type, createdAt: today(), status: "Vídeo editado gerado",
       };
-      // a versão editada reaproveita o mesmo blob do original para preview (reordenação é simulada)
+      // preview usa o mesmo blob, mas REORDENA a reprodução (retenção → original), não é cópia
       if (URLS["orig:" + cid]) URLS[version.id] = URLS["orig:" + cid];
       S.actions.withVideo(cid, (v, c) => {
         v.versions = v.versions.filter((x) => x.kind !== "Abertura Inteligente" || false); // mantém histórico? removemos só a anterior de mesmo nome
@@ -178,30 +188,53 @@ window.VideoStudio = (function () {
     const v = vid();
     const edited = v.versions.find((x) => x.id === versionId);
     const origUrl = URLS["orig:" + cid];
+    const eUrl = URLS[versionId];
+    const seq = edited.sequence || [];
+    const editedPane = eUrl
+      ? `<div class="rec-stage" style="max-height:46vh">
+          <video id="vs-seq" src="${eUrl}" playsinline style="width:100%;height:100%;object-fit:cover"></video>
+          <div class="rec-hud"><span class="rec-badge" id="vs-seq-phase">▶ Abertura</span></div>
+          <div class="vs-screen-text">“${esc(edited.screenText)}”</div>
+        </div>
+        <button class="btn btn-sm btn-block" id="vs-seq-play" style="margin-top:8px">▶ Reproduzir sequência (retenção → original)</button>`
+      : playerHTML(eUrl, true, mmss(edited.duration), edited.screenText);
     shell("Vídeo editado pronto", `
       <div class="vs-compare">
-        <div>
-          <div class="vs-tag">Original</div>
-          ${playerHTML(origUrl, !origUrl, mmss(v.original ? v.original.duration : 0))}
-        </div>
-        <div>
-          <div class="vs-tag text-accent">✨ Abertura Inteligente</div>
-          ${playerHTML(URLS[versionId], !URLS[versionId], mmss(edited.duration), edited.screenText)}
-        </div>
+        <div><div class="vs-tag">Original</div>${playerHTML(origUrl, !origUrl, mmss(v.original ? v.original.duration : 0))}</div>
+        <div><div class="vs-tag text-accent">✨ Abertura Inteligente</div>${editedPane}</div>
       </div>
       <div class="info-block" style="margin-top:16px"><h4>🎬 O que a IA fez</h4>
         <div class="kv">
-          <div class="k">Cena usada na abertura</div><div class="v">${esc(edited.sceneUsed)} <span class="pill pill-gray">${esc(edited.sceneType || "")}</span></div>
+          <div class="k">Sequência montada</div><div class="v"><b class="text-accent">Trecho de retenção ${esc(edited.sceneUsed)}</b> → vídeo original completo</div>
           <div class="k">Texto aplicado na tela</div><div class="v">“${esc(edited.screenText)}”</div>
           <div class="k">Motivo da IA</div><div class="v">${esc(edited.aiNote)}</div>
         </div>
-        <div class="vs-timeline">${timelineChips(edited.structure)}</div>
+        <div class="vs-timeline">${seq.map((s, i) => `<span class="vs-scene-chip ${i === 0 ? "strong" : ""}">${i === 0 ? "▶ " : ""}${esc(s.label)}${i === 0 ? ` (${mmss(s.start)}–${mmss(s.end)})` : ""}</span>`).join('<span class="vs-arrow">→</span>')}<span class="vs-arrow">→</span><span class="vs-scene-chip">CTA</span></div>
         <div class="pill pill-accent" style="margin-top:10px">✓ ${esc(edited.status)}</div>
       </div>`,
       `<button class="btn btn-sm" data-vs="use-orig">Usar versão original</button>
        <button class="btn btn-sm" data-vs="gen-other">🔁 Gerar outra versão</button>
        <button class="btn btn-sm" data-vs="send-analysis" data-ver="${versionId}">🔍 Enviar para análise</button>
        <button class="btn btn-primary" data-vs="use-edited" data-ver="${versionId}">✓ Usar versão editada</button>`);
+    const o = document.getElementById("vs-overlay");
+    const el = o && o.querySelector("#vs-seq");
+    if (el) setupSequence(el, seq, o);
+  }
+
+  // Reproduz a sequência: trecho de retenção primeiro, depois o vídeo original completo
+  function setupSequence(el, seq, o) {
+    const phaseEl = o.querySelector("#vs-seq-phase");
+    let phase = 0;
+    const playPhase = (i) => {
+      const s = seq[i]; if (!s) { el.pause(); if (phaseEl) phaseEl.textContent = "✓ fim"; return; }
+      phase = i; try { el.currentTime = s.start || 0; } catch (e) {}
+      if (phaseEl) phaseEl.textContent = (i === 0 ? "▶ " : "") + s.label;
+      el.play().catch(() => {});
+    };
+    el.ontimeupdate = () => { const s = seq[phase]; if (!s) return; if (el.currentTime >= (s.end || el.duration) - 0.08) playPhase(phase + 1); };
+    el.onended = () => playPhase(phase + 1);
+    const btn = o.querySelector("#vs-seq-play"); if (btn) btn.onclick = () => playPhase(0);
+    playPhase(0);
   }
 
   function timelineChips(structure) {

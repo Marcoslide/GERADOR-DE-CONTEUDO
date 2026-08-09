@@ -6,7 +6,7 @@ window.CardView = (function () {
   const S = window.Store, U = window.UI, AI = window.AI, esc = U.esc, fmt = U.fmt, pill = U.statusPill;
   let cardId = null, tab = "Executar";
 
-  const TABS = ["Executar", "Roteiro", "Conteúdo", "Checklist", "Análise e Correção"];
+  const TABS = ["Executar", "Roteiro", "Conteúdo", "Checklist", "Publicação", "Análise e Correção"];
   const METHODS = ["Promessa Forte", "Gancho de Retenção", "Dor e Solução", "Antes e Depois", "Prova Social", "Review", "Demonstração", "Comparação", "Unboxing", "Oferta Clara", "Urgência", "Bastidor de Autoridade", "Resposta a Comentário", "Quebra de Objeção", "Conteúdo de Rua", "Produto no Dia a Dia", "Transformação", "Comunidade e Desejo", "Frases de Corte", "Volume e Distribuição", "Teste de Variações"];
   const METHOD_ICO = { "Promessa Forte": "🎯", "Gancho de Retenção": "🪝", "Dor e Solução": "💢", "Antes e Depois": "🔄", "Prova Social": "👥", "Review": "⭐", "Demonstração": "🧪", "Comparação": "⚖️", "Unboxing": "📦", "Oferta Clara": "🏷️", "Urgência": "⏰", "Bastidor de Autoridade": "🎬", "Resposta a Comentário": "💬", "Quebra de Objeção": "🛡️", "Conteúdo de Rua": "🏙️", "Produto no Dia a Dia": "🏠", "Transformação": "✨", "Comunidade e Desejo": "❤️", "Frases de Corte": "✂️", "Volume e Distribuição": "📡", "Teste de Variações": "🧬" };
 
@@ -60,8 +60,54 @@ window.CardView = (function () {
       case "Roteiro": return tRoteiro(c);
       case "Conteúdo": return tConteudo(c);
       case "Checklist": return tChecklist(c);
+      case "Publicação": return tPublicacaoTab(c);
       case "Análise e Correção": return tAnaliseCorrecao(c);
     }
+  }
+
+  // ---------- PUBLICAÇÃO ----------
+  function tPublicacaoTab(c) {
+    const PE = window.PublishEngine;
+    const p = c.publication || {};
+    const st = PE.pubStatus(c);
+    const approval = p.approval || PE.APPROVAL_ITEMS.map((t) => ({ t, done: !!p.approved }));
+    const doneN = approval.filter((i) => i.done).length;
+    const PUB_STATUS = ["Rascunho", "Conteúdo gerado", "Aguardando aprovação", "Aprovado", "Agendado", "Publicando", "Publicado", "Publicado manualmente", "Falha na publicação", "Em análise"];
+    return `
+      <div class="grid grid-2" style="align-items:start">
+        <div>
+          <div class="info-block"><h4>✅ Checklist de aprovação <span class="chk-prog" style="margin-left:auto">${doneN}/${approval.length}</span></h4>
+            ${approval.map((i, ii) => `<div class="chk-item"><div class="chk-box ${i.done ? "done" : ""}" data-appr="${ii}">${i.done ? "✓" : ""}</div><div class="ci-text ${i.done ? "done" : ""}">${esc(i.t)}</div></div>`).join("")}
+            <button class="btn btn-primary btn-sm mt-16" data-ca="pub-approve">✓ Aprovar para publicação</button>
+          </div>
+          <div class="info-block mb-0"><h4>📤 Status</h4>
+            <div class="flex gap-8 center wrap" style="margin-bottom:10px">${pill(st)} ${p.publishedAt ? `<span class="muted">${esc(p.publishedAt)}</span>` : ""}</div>
+            <div class="flex gap-8 wrap">
+              <button class="btn btn-sm" data-ca="pub-schedule">📅 Agendar</button>
+              <button class="btn btn-sm btn-primary" data-ca="pub-now">🚀 Publicar agora</button>
+              <button class="btn btn-sm" data-ca="pub-manual">✍️ Marcar publicado manualmente</button>
+              <button class="btn btn-sm" data-ca="pub-metrics">📊 Coletar métricas</button>
+            </div>
+          </div>
+        </div>
+        <div>
+          <div class="info-block"><h4>🗓️ Agendamento</h4>
+            <div class="kv">
+              <div class="k">Canal</div><div class="v">${selChannel(p.channel || c.channel, "pub.channel")}</div>
+              <div class="k">Data / hora</div><div class="v"><div class="flex gap-8"><input class="input" type="date" data-p="date" value="${esc(p.date || "")}"/><input class="input" type="time" data-p="time" value="${esc(p.time || "")}" style="max-width:120px"/></div></div>
+              <div class="k">Modo</div><div class="v"><span class="pill pill-gray">${esc(p.mode || (S.sel.campaign(c.campaignId) || {}).publishMode || "Automático com aprovação")}</span></div>
+              <div class="k">Status</div><div class="v"><select class="select" data-pubstatus>${PUB_STATUS.map((s) => `<option ${s === st ? "selected" : ""}>${esc(s)}</option>`).join("")}</select></div>
+            </div>
+          </div>
+          <div class="info-block mb-0"><h4>✍️ Conteúdo da publicação</h4>
+            <div class="field"><label>Legenda final</label><textarea class="textarea" data-p="captionFinal">${esc(p.captionFinal || c.script.caption || "")}</textarea></div>
+            <div class="field"><label>Hashtags</label><textarea class="textarea" data-p="hashtagsFinal" style="min-height:50px">${esc(p.hashtagsFinal || c.script.hashtags || "")}</textarea></div>
+            <div class="field"><label>CTA</label><input class="input" data-p="ctaFinal" value="${esc(p.ctaFinal || c.script.cta || "")}"/></div>
+            <div class="field mb-0"><label>🔗 Link publicado</label><input class="input" data-p="link" value="${esc(p.link || "")}" placeholder="Gerado ao publicar (ou cole o seu)"/></div>
+            <div class="flex gap-8 wrap" style="margin-top:12px"><button class="btn btn-xs" data-ca="copy-caption">📋 Copiar legenda</button><button class="btn btn-xs" data-ca="copy-hashtags">📋 Copiar hashtags</button><button class="btn btn-xs" data-sim="Baixar vídeo">⬇️ Baixar vídeo</button></div>
+          </div>
+        </div>
+      </div>`;
   }
 
   // ---------- EXECUTAR (resumo + estratégia IA + visual + ações) ----------
@@ -563,6 +609,14 @@ window.CardView = (function () {
     root.querySelectorAll("[data-chkgname]").forEach((el) => { el.setAttribute("contenteditable", "true"); el.onblur = () => { const t = el.innerText.trim(); if (t) S.actions.chkRenameGroup(cardId, +el.dataset.chkgname, t); }; });
     root.querySelectorAll("[data-chkadd]").forEach((el) => el.onkeydown = (e) => { if (e.key === "Enter") { const t = el.value.trim(); if (t) { S.actions.chkAddItem(cardId, +el.dataset.chkadd, t); refreshBody(); } } });
 
+    // Publicação: checklist de aprovação + status
+    root.querySelectorAll("[data-appr]").forEach((el) => el.onclick = () => {
+      const ii = +el.dataset.appr;
+      S.update((s) => { const cc = s.cards.find((x) => x.id === cardId); if (!cc.publication) cc.publication = {}; if (!cc.publication.approval) cc.publication.approval = window.PublishEngine.APPROVAL_ITEMS.map((t) => ({ t, done: false })); cc.publication.approval[ii].done = !cc.publication.approval[ii].done; });
+      refreshBody();
+    });
+    const ps = root.querySelector("[data-pubstatus]"); if (ps) ps.onchange = () => { S.actions.patchCard(cardId, "publication.pubStatus", ps.value); refreshHead(); };
+
     // Content path switch (Gravar agora abre o estúdio direto)
     root.querySelectorAll("[data-path]").forEach((el) => el.onclick = () => { S.actions.patchCard(cardId, "content.path", el.dataset.path || null); refreshBody(); if (el.dataset.path === "gravar") window.Recorder.open(cardId); });
 
@@ -823,6 +877,14 @@ window.CardView = (function () {
         U.toast("Variação criada no Board ✓"); break;
       case "published":
         S.actions.setCardStatus(cardId, "Publicado"); S.actions.patchCard(cardId, "publication.status", "Publicado"); U.toast("Marcado como publicado ✓"); refreshHead(); break;
+      case "pub-approve": window.PublishEngine.approve(cardId); refreshBody(); refreshHead(); break;
+      case "pub-schedule": { const p = c.publication || {}; if (!p.date) return U.toast("Defina data e hora primeiro", "warn"); window.PublishEngine.schedule(cardId); refreshBody(); refreshHead(); break; }
+      case "pub-now": window.PublishEngine.publishNow(cardId, () => { render(); }); break;
+      case "pub-manual": {
+        U.modal({ title: "Marcar como publicado", size: "narrow", body: `<div class="field mb-0"><label>Link da publicação (opcional)</label><input class="input" id="pm-link" placeholder="https://instagram.com/p/…"/></div>`, foot: `<button class="btn btn-ghost" data-close>Cancelar</button><button class="btn btn-primary" id="pm-ok">Marcar publicado</button>`, onMount: (o) => o.querySelector("#pm-ok").onclick = () => { window.PublishEngine.markPublished(cardId, o.querySelector("#pm-link").value.trim()); U.closeModal(); refreshBody(); refreshHead(); } });
+        break;
+      }
+      case "pub-metrics": window.PublishEngine.collectMetrics(cardId); tab = "Análise e Correção"; render(); break;
       case "correction": tab = "Análise e Correção"; render(); break;
       case "create-correction": {
         const reason = document.querySelector("#cor-reason").value;

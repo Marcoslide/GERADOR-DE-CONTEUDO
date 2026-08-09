@@ -30,6 +30,14 @@ window.Recorder = (function () {
   function open(id) {
     cardId = id;
     resetMedia();
+    // O teleprompter precisa da Fala Principal — se não existir, a IA gera o roteiro antes de gravar.
+    const c = S.sel.card(id);
+    if (window.AI && (!c.script || !c.script.mainLine)) {
+      const camp = S.sel.campaign(c.campaignId) || {};
+      const ns = window.AI.generateScriptForCard(c, camp);
+      S.actions.updateCard(id, { script: Object.assign({}, c.script, ns) });
+      U.toast("Roteiro gerado pela IA para o teleprompter ✓");
+    }
     renderPrep();
   }
 
