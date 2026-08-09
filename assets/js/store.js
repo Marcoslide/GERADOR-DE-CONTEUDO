@@ -2,7 +2,7 @@
    R.E.A.L. OS — Store (estado + persistência localStorage)
    ============================================================ */
 window.Store = (function () {
-  const KEY = "real_os_state_v1";
+  const KEY = "viraliza_state_v1";
   let state = null;
   const listeners = [];
 

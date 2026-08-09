@@ -44,7 +44,7 @@ window.Views = (function () {
 
     return `
       <div class="hero-today">
-        <div class="ht-tag">R.E.A.L. OS · Central de execução</div>
+        <div class="ht-tag">VIRALIZA · Central de execução</div>
         <h1>Hoje faça isso.</h1>
         <p>Sua máquina de execução de conteúdo e performance. Transforme ideia ou produto em conteúdo pronto para criar, publicar, analisar e melhorar.</p>
         <div class="motto">

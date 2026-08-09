@@ -33,8 +33,8 @@ window.App = (function () {
     const pct = Math.round((st.credits.available / st.credits.total) * 100);
     document.getElementById("sidebar").innerHTML = `
       <div class="brand" data-nav="hoje">
-        <div class="brand-logo">R</div>
-        <div><div class="brand-name">R.E.A.L. OS</div><div class="brand-sub">Execução de conteúdo</div></div>
+        <div class="brand-logo">V</div>
+        <div><div class="brand-name">VIRALIZA</div><div class="brand-sub">Execução de conteúdo</div></div>
       </div>
       <div class="nav">
         <div class="nav-label">Operação</div>${items}
@@ -51,7 +51,7 @@ window.App = (function () {
   function renderHeader() {
     const { view, param } = currentRoute();
     const titles = { hoje: ["Hoje", "sua central de execução"], ideias: ["Ideias", "capture e transforme"], campanhas: ["Campanhas", "estratégia → execução"], campanha: ["Campanha", ""], board: ["Board", "produção de conteúdo"], analise: ["Análise", "performance e correção"], biblioteca: ["Biblioteca", "acervo reutilizável"], persona: ["Persona", "identidade da marca"], config: ["Configurações", ""] };
-    const [t, sub] = titles[view] || ["R.E.A.L. OS", ""];
+    const [t, sub] = titles[view] || ["VIRALIZA", ""];
     document.getElementById("header").innerHTML = `
       <div class="menu-toggle" id="menu-toggle">☰</div>
       <div><h1>${esc(t)}</h1></div><span class="sub">${esc(sub)}</span>
@@ -283,7 +283,13 @@ window.App = (function () {
       case "new-campaign": openCampaignForm(); break;
       case "new-card": openCardForm(); break;
       case "add-priority": U.modal({ title: "Nova prioridade", size: "narrow", body: field("O que fazer hoje?", "pr-text", "") + field("Detalhe", "pr-meta", ""), foot: `<button class="btn btn-ghost" data-close>Cancelar</button><button class="btn btn-primary" id="pr-save">Adicionar</button>`, onMount: (o) => o.querySelector("#pr-save").onclick = () => { const t = o.querySelector("#pr-text").value.trim(); if (!t) return; S.actions.addPriority(t, o.querySelector("#pr-meta").value); U.closeModal(); U.toast("Prioridade adicionada ✓"); } }); break;
-      case "send-video": case "record": case "gen-ai": case "analyze": case "script": {
+      case "record": {
+        const card = S.get().cards.find((c) => !["Concluído", "Publicado"].includes(c.status)) || S.get().cards[0];
+        if (!card) return openCardForm();
+        window.Recorder.open(card.id);
+        break;
+      }
+      case "send-video": case "gen-ai": case "analyze": case "script": {
         // open first active card on the relevant tab
         const card = S.get().cards.find((c) => !["Concluído", "Publicado"].includes(c.status)) || S.get().cards[0];
         if (!card) return openCardForm();

@@ -238,28 +238,23 @@ window.CardView = (function () {
 
   function contentRecord(c, creatives) {
     const s = c.script || {};
+    const takes = (c.content.creatives || []).filter((x) => /Grava|gancho|CTO|CTA/.test((x.source || "") + (x.type || "")));
     return `
       <button class="btn btn-ghost btn-sm" data-path="" style="margin-bottom:12px">← Caminhos</button>
-      <div class="grid grid-2" style="align-items:start">
-        <div class="info-block"><h4>🎥 Gravar agora</h4>
-          <div style="aspect-ratio:9/16;max-width:220px;margin:0 auto;background:var(--bg-0);border:1px solid var(--border-2);border-radius:14px;display:grid;place-items:center;position:relative;overflow:hidden">
-            <div style="position:absolute;top:10px;left:10px;right:10px;background:rgba(0,0,0,.5);padding:8px;border-radius:8px;font-size:11px;color:var(--accent-2)"><b>Gancho:</b> ${esc(s.hook || "—")}</div>
-            <div style="text-align:center;color:var(--text-3)"><div style="font-size:34px">📷</div><div style="font-size:12px;margin-top:6px">Câmera (simulada)</div></div>
-            <div style="position:absolute;bottom:10px;left:0;right:0;text-align:center;font-size:11px;color:var(--text-2)">⏱️ Tempo recomendado: 15–25s</div>
+      <div class="info-block"><h4>🎥 Gravar agora</h4>
+        <div class="grid grid-2" style="align-items:center;gap:18px">
+          <div>
+            <p class="muted" style="margin-bottom:12px">Estúdio de gravação com <b>câmera + teleprompter</b>. O roteiro aparece na tela para você ler e <b>não</b> entra no vídeo final. Ajuste velocidade, fonte, contagem regressiva, pause, repita, salve o take, baixe e envie para análise.</p>
+            <div class="script-block"><div class="sb-label">🪝 Vai aparecer no teleprompter</div><div class="sb-content">${esc(s.hook || "Sem gancho — crie o roteiro primeiro")}</div></div>
+            <button class="btn btn-primary btn-block mt-16" data-ca="open-recorder">🎬 Abrir estúdio de gravação</button>
           </div>
-          <div class="flex gap-8 center" style="justify-content:center;margin-top:14px">
-            <button class="btn btn-sm" data-ca="record-repeat">↺ Repetir</button>
-            <button class="btn btn-primary" data-ca="record-take">⏺️ Gravar</button>
-            <button class="btn btn-sm" data-ca="record-save">💾 Salvar take</button>
+          <div style="aspect-ratio:9/16;background:var(--bg-0);border:1px solid var(--border-2);border-radius:14px;display:grid;place-items:center;position:relative;overflow:hidden;max-width:200px;margin:0 auto">
+            <div style="position:absolute;left:10px;right:10px;bottom:12px;top:45%;background:linear-gradient(180deg,transparent,rgba(0,0,0,.55));border-radius:8px;padding:8px;font-size:10px;color:#fff;display:flex;align-items:flex-end"><span style="color:var(--accent-2);font-weight:700">${esc((s.hook || "roteiro rola aqui…").slice(0, 60))}</span></div>
+            <div style="text-align:center;color:var(--text-3)"><div style="font-size:30px">📷</div><div style="font-size:11px;margin-top:4px">prévia</div></div>
           </div>
         </div>
-        <div class="info-block"><h4>✅ Checklist antes de gravar</h4>
-          ${["Cenário escolhido", "Luz testada", "Áudio testado", "Produto em cena", "Roteiro revisado"].map((i) => `<div class="chk-item"><div class="chk-box done">✓</div><div class="ci-text">${esc(i)}</div></div>`).join("")}
-          <div class="divider"></div>
-          <div class="script-block mb-0"><div class="sb-label">🎙️ Fala principal</div><div class="sb-content">${esc(s.mainLine || "—")}</div></div>
-          <div class="flex gap-8 mt-16"><button class="btn btn-sm" data-ca="analyze">🔍 Enviar para análise</button><button class="btn btn-sm" data-sim="Baixar vídeo">⬇️ Baixar</button></div>
-        </div>
-      </div>`;
+      </div>
+      ${takes.length ? `<div class="info-block mb-0"><h4>🎬 Takes gravados</h4>${takes.map((cr) => `<div class="file-tile" style="margin-bottom:8px"><div class="ft-ico">🎬</div><div style="flex:1"><div class="ft-name">${esc(cr.fileName || cr.type)}</div><div class="ft-meta">${esc(cr.type)} · ${esc(cr.source)}</div></div><span class="pill pill-accent">${esc(cr.status)}</span></div>`).join("")}<button class="btn btn-sm mt-16" data-ca="open-recorder">🎥 Gravar outro take</button></div>` : ""}`;
   }
 
   // ---------- CHECKLIST ----------
@@ -400,8 +395,8 @@ window.CardView = (function () {
     // Checklist
     root.querySelectorAll("[data-chk]").forEach((el) => el.onclick = () => { const [gi, ii] = el.dataset.chk.split("-").map(Number); S.actions.toggleChecklist(cardId, gi, ii); refreshBody(); });
 
-    // Content path switch
-    root.querySelectorAll("[data-path]").forEach((el) => el.onclick = () => { S.actions.patchCard(cardId, "content.path", el.dataset.path || null); refreshBody(); });
+    // Content path switch (Gravar agora abre o estúdio direto)
+    root.querySelectorAll("[data-path]").forEach((el) => el.onclick = () => { S.actions.patchCard(cardId, "content.path", el.dataset.path || null); refreshBody(); if (el.dataset.path === "gravar") window.Recorder.open(cardId); });
 
     // Roteiro tools
     root.querySelectorAll("[data-rt]").forEach((el) => el.onclick = () => roteiroTool(el.dataset.rt));
@@ -473,7 +468,8 @@ window.CardView = (function () {
     switch (a) {
       case "iniciar": S.actions.setCardStatus(cardId, "Roteiro"); U.toast("Execução iniciada"); refreshHead(); break;
       case "send-video": S.actions.patchCard(cardId, "content.path", "enviar"); tab = "Conteúdo"; render(); break;
-      case "record": S.actions.patchCard(cardId, "content.path", "gravar"); tab = "Conteúdo"; render(); break;
+      case "record": S.actions.patchCard(cardId, "content.path", "gravar"); tab = "Conteúdo"; window.Recorder.open(cardId); break;
+      case "open-recorder": window.Recorder.open(cardId); break;
       case "gen-ai": S.actions.patchCard(cardId, "content.path", "gerar"); tab = "Conteúdo"; render(); break;
       case "analyze":
         S.actions.setCardStatus(cardId, "Enviado para análise");

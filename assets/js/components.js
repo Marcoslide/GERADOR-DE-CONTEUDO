@@ -86,7 +86,7 @@ window.UI = (function () {
     chatState.context = context || "Assistente global";
     chatState.actions = actions || DEFAULT_ACTIONS;
     if (chatState.messages.length === 0 || context) {
-      chatState.messages = [{ role: "ai", text: seedMsg || "Oi! Sou o assistente do R.E.A.L. OS. Me conta uma ideia, produto ou vídeo que eu transformo em ação.", actions: chatState.actions }];
+      chatState.messages = [{ role: "ai", text: seedMsg || "Oi! Sou o assistente do VIRALIZA. Me conta uma ideia, produto ou vídeo que eu transformo em ação.", actions: chatState.actions }];
     }
     renderChat();
   }
@@ -167,7 +167,7 @@ window.UI = (function () {
       <div class="chat-panel">
         <div class="chat-head">
           <div class="ch-ai">✦</div>
-          <div style="flex:1"><div class="ch-name">Assistente R.E.A.L.</div><div class="ch-ctx">Contexto: ${esc(chatState.context)}</div></div>
+          <div style="flex:1"><div class="ch-name">Assistente VIRALIZA</div><div class="ch-ctx">Contexto: ${esc(chatState.context)}</div></div>
           <div class="x-btn" id="chat-close">✕</div>
         </div>
         <div class="chat-body">${msgs}</div>
