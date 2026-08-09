@@ -112,8 +112,34 @@ window.AIProvider = (function () {
   }
 
   function lastErr() { return lastError; }
+
+  // Diagnóstico passo a passo: onde estou, modo, backend, chave, Claude, próximo passo.
+  async function diagnose() {
+    const onFile = location.protocol === "file:";
+    const d = {
+      runtime: onFile ? "file://" : location.protocol + "//" + location.host,
+      onFile, mode: isReal() ? "Claude Real" : "Modo Simulado",
+      backendUrl: base() || "(mesma origem)",
+      backendResponded: false, keyDetected: false, claudeResponded: false, jsonValid: false, nextStep: "",
+    };
+    if (onFile) {
+      d.nextStep = "Você abriu via file:// (modo simulado). Para Claude Real, rode o backend (cd server && npm install && npm start) e abra http://localhost:3000.";
+      return d;
+    }
+    const s = await status();
+    d.backendResponded = !!(s && s.success);
+    if (!d.backendResponded) { d.nextStep = "Backend não respondeu em " + d.backendUrl + ". Suba o servidor: cd server && npm start."; return d; }
+    d.keyDetected = !!s.configured;
+    if (!d.keyDetected) { d.nextStep = "Backend online, mas SEM ANTHROPIC_API_KEY. Crie server/.env, cole a chave e reinicie o backend."; return d; }
+    const t = await testConnection();
+    d.claudeResponded = !!(t && t.success);
+    d.jsonValid = !!(t && t.sample) || d.claudeResponded;
+    d.nextStep = d.claudeResponded ? "Claude conectado. IA real disponível no Viraliza." : ("Backend com chave, mas o teste falhou: " + ((t.error && t.error.message) || "erro desconhecido") + ".");
+    return d;
+  }
+
   return {
-    isReal, base, normalizeAIBackendUrl, status, testConnection, call, withClaude, executeActions, learningContext, lastErr,
+    isReal, base, normalizeAIBackendUrl, status, testConnection, diagnose, call, withClaude, executeActions, learningContext, lastErr,
     assistantReply, generateScript, generateVariations, generateCampaign, generateCards,
     generateMainSpeech, generateCaption, generateChecklist, generateVisualDirection,
     analyzeContent, generateCorrection, createPublicationPlan,

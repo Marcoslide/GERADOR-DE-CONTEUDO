@@ -3053,11 +3053,26 @@ window.Views = (function () {
           <div class="form-row"><div class="field"><label>Modelo Claude</label><select class="select" data-ai="model">${["claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5-20251001"].map((m) => `<option ${m === ai.model ? "selected" : ""}>${m}</option>`).join("")}</select></div><div class="field"><label>Temperatura</label><input class="input" type="number" step="0.1" min="0" max="1" data-ai="temperature" value="${ai.temperature}"/></div></div>
           <div class="field"><label>Máx. tokens</label><input class="input" type="number" data-ai="maxTokens" value="${ai.maxTokens}"/></div>
         </div>
-        <div class="flex gap-8 center wrap" style="margin-top:6px"><span class="pill ${stCls}" id="ai-status-pill">${esc(stTxt)}</span><button class="btn btn-sm" data-act="ai-test">Testar conexão</button><button class="btn btn-primary btn-sm" data-act="ai-save">Salvar configuração</button><button class="btn btn-sm" data-act="ai-simulated">Voltar ao simulado</button></div>
-        <div class="alert warn" style="margin-top:12px"><span class="al-ico">🔐</span><div class="al-body" style="font-size:12px">A chave <code>ANTHROPIC_API_KEY</code> deve ficar <b>no backend</b>. Não exponha chave no navegador.</div></div>
+        <div class="flex gap-8 center wrap" style="margin-top:6px"><span class="pill ${stCls}" id="ai-status-pill">${esc(stTxt)}</span><button class="btn btn-sm" data-act="ai-test">Testar conexão</button><button class="btn btn-sm" data-act="ai-diag">🔍 Diagnosticar conexão Claude</button><button class="btn btn-primary btn-sm" data-act="ai-save">Salvar configuração</button><button class="btn btn-sm" data-act="ai-simulated">Voltar ao simulado</button></div>
+        <div id="ai-diag"></div>
+        <div class="alert warn" style="margin-top:12px"><span class="al-ico">🔐</span><div class="al-body" style="font-size:12px">A chave <code>ANTHROPIC_API_KEY</code> deve ficar <b>no backend</b>. Não exponha chave no navegador. Por isso não há campo de token aqui.</div></div>
       </div>
-      <div class="info-block mb-0"><h4>🔌 Como ligar o Claude real</h4>
-        <p class="muted" style="font-size:12px;line-height:1.6"><code style="color:var(--accent-2)">Frontend → /api/ai/claude → Claude API</code>. Rode o backend em <code>server/</code> (<code>npm install && npm start</code> com a <code>ANTHROPIC_API_KEY</code> no <code>.env</code>), abra o app por <code>http://localhost:3000</code>, escolha <b>Claude Real</b> aqui e <b>Testar conexão</b>. Sem backend/chave, tudo funciona em <b>modo simulado</b> (mock) automaticamente. Todas as gerações passam pelo <code>AIProviderService</code>.</p>
+      <div class="info-block"><h4>🧭 HTML direto x Claude Real</h4>
+        <div class="alert" style="margin-bottom:10px"><span class="al-ico">💡</span><div class="al-body" style="font-size:12px"><b>HTML direto (file://) = modo simulado.</b> <b>Claude Real</b> = precisa rodar o backend com a <code>ANTHROPIC_API_KEY</code> no <code>server/.env</code>.</div></div>
+      </div>
+      <div class="info-block mb-0"><h4>🔌 Como testar Claude Real</h4>
+        <ol style="font-size:12px;line-height:1.9;color:var(--text-1);padding-left:18px;margin:0">
+          <li>Abra a pasta do projeto.</li>
+          <li>Entre em <code>server/</code></li>
+          <li>Copie <code>.env.example</code> para <code>.env</code></li>
+          <li>Cole sua <code>ANTHROPIC_API_KEY</code> no <code>.env</code></li>
+          <li>Rode <code>npm install</code></li>
+          <li>Rode <code>npm start</code></li>
+          <li>Abra <code>http://localhost:3000</code></li>
+          <li>Selecione <b>Claude Real</b> (URL do backend pode ficar em branco)</li>
+          <li>Clique em <b>Testar conexão</b> (ou <b>Diagnosticar conexão Claude</b>)</li>
+        </ol>
+        <p class="muted" style="font-size:11px;margin-top:8px;line-height:1.6"><code style="color:var(--accent-2)">Frontend → /api/ai/claude → Claude API</code>. Sem backend/chave, tudo cai em <b>modo simulado</b> automaticamente. Todas as gerações passam pelo <code>AIProviderService</code>.</p>
       </div>`;
   }
 
@@ -3131,6 +3146,21 @@ window.Views = (function () {
       U.toast("Configuração de IA salva ✓"); window.App.render();
     });
     root.querySelectorAll("[data-act='ai-simulated']").forEach((el) => el.onclick = () => { S.update((s) => { s.ai.provider = "Modo Simulado"; s.ai.status = "simulado"; }); U.toast("Voltou ao modo simulado"); window.App.render(); });
+    root.querySelectorAll("[data-act='ai-diag']").forEach((el) => el.onclick = async () => {
+      const box = root.querySelector("#ai-diag"); if (box) box.innerHTML = `<div class="muted" style="font-size:12px;margin-top:10px">Diagnosticando…</div>`;
+      const d = await window.AIProvider.diagnose();
+      const yn = (b, na) => na ? '<span class="pill pill-gray">n/a</span>' : (b ? '<span class="pill pill-accent">sim</span>' : '<span class="pill pill-red">não</span>');
+      const rows = [
+        ["Ambiente", `<code>${esc(d.runtime)}</code>`],
+        ["Modo atual", esc(d.mode)],
+        ["URL do backend", `<code>${esc(d.backendUrl)}</code>`],
+        ["Backend respondeu?", d.onFile ? '<span class="pill pill-gray">n/a (file://)</span>' : yn(d.backendResponded)],
+        ["ANTHROPIC_API_KEY detectada?", d.onFile || !d.backendResponded ? yn(false, true) : yn(d.keyDetected)],
+        ["Claude respondeu?", d.keyDetected ? yn(d.claudeResponded) : yn(false, true)],
+        ["JSON válido?", d.keyDetected ? yn(d.jsonValid) : yn(false, true)],
+      ].map(([k, v]) => `<div class="kv-row" style="display:flex;justify-content:space-between;gap:10px;padding:4px 0;border-bottom:1px solid var(--stroke)"><span class="muted" style="font-size:12px">${k}</span><span style="font-size:12px">${v}</span></div>`).join("");
+      if (box) box.innerHTML = `<div class="info-block" style="margin-top:12px;background:var(--bg-2)"><h4 style="font-size:13px">🔍 Diagnóstico</h4>${rows}<div class="alert ${d.claudeResponded ? "" : "warn"}" style="margin-top:10px"><span class="al-ico">${d.claudeResponded ? "✅" : "➡️"}</span><div class="al-body" style="font-size:12px"><b>Próximo passo:</b> ${esc(d.nextStep)}</div></div></div>`;
+    });
     // Aprendizados
     root.querySelectorAll("[data-lforget]").forEach((el) => el.onclick = () => { window.Learning.forget(el.dataset.lforget); U.toast("Aprendizado esquecido"); window.App.render(); });
     // Export / Import
@@ -5617,8 +5647,34 @@ window.AIProvider = (function () {
   }
 
   function lastErr() { return lastError; }
+
+  // Diagnóstico passo a passo: onde estou, modo, backend, chave, Claude, próximo passo.
+  async function diagnose() {
+    const onFile = location.protocol === "file:";
+    const d = {
+      runtime: onFile ? "file://" : location.protocol + "//" + location.host,
+      onFile, mode: isReal() ? "Claude Real" : "Modo Simulado",
+      backendUrl: base() || "(mesma origem)",
+      backendResponded: false, keyDetected: false, claudeResponded: false, jsonValid: false, nextStep: "",
+    };
+    if (onFile) {
+      d.nextStep = "Você abriu via file:// (modo simulado). Para Claude Real, rode o backend (cd server && npm install && npm start) e abra http://localhost:3000.";
+      return d;
+    }
+    const s = await status();
+    d.backendResponded = !!(s && s.success);
+    if (!d.backendResponded) { d.nextStep = "Backend não respondeu em " + d.backendUrl + ". Suba o servidor: cd server && npm start."; return d; }
+    d.keyDetected = !!s.configured;
+    if (!d.keyDetected) { d.nextStep = "Backend online, mas SEM ANTHROPIC_API_KEY. Crie server/.env, cole a chave e reinicie o backend."; return d; }
+    const t = await testConnection();
+    d.claudeResponded = !!(t && t.success);
+    d.jsonValid = !!(t && t.sample) || d.claudeResponded;
+    d.nextStep = d.claudeResponded ? "Claude conectado. IA real disponível no Viraliza." : ("Backend com chave, mas o teste falhou: " + ((t.error && t.error.message) || "erro desconhecido") + ".");
+    return d;
+  }
+
   return {
-    isReal, base, normalizeAIBackendUrl, status, testConnection, call, withClaude, executeActions, learningContext, lastErr,
+    isReal, base, normalizeAIBackendUrl, status, testConnection, diagnose, call, withClaude, executeActions, learningContext, lastErr,
     assistantReply, generateScript, generateVariations, generateCampaign, generateCards,
     generateMainSpeech, generateCaption, generateChecklist, generateVisualDirection,
     analyzeContent, generateCorrection, createPublicationPlan,
