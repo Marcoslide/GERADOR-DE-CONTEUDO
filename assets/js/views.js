@@ -715,7 +715,7 @@ window.Views = (function () {
       <div class="info-block"><h4>🤖 IA Principal</h4>
         <div class="field"><label>Modo</label><select class="select" data-ai="provider"><option ${!real ? "selected" : ""}>Modo Simulado</option><option ${real ? "selected" : ""}>Claude Real</option></select></div>
         <div id="ai-real-fields" style="${real ? "" : "display:none"}">
-          <div class="field"><label>URL do backend</label><input class="input" data-ai="backendUrl" value="${esc(ai.backendUrl || "")}" placeholder="http://localhost:3000 (vazio = mesma origem)"/></div>
+          <div class="field"><label>URL do backend</label><input class="input" data-ai="backendUrl" value="${esc(ai.backendUrl || "")}" placeholder="http://localhost:3000 (vazio = mesma origem)"/><div class="muted" style="font-size:11px;margin-top:4px">Deixe em branco se abrir pelo próprio backend, ou informe só a origem (<code>http://localhost:3000</code>). Se colar a URL completa (<code>http://localhost:3000/api/ai/claude</code>) por engano, também funciona.</div></div>
           <div class="form-row"><div class="field"><label>Modelo Claude</label><select class="select" data-ai="model">${["claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5-20251001"].map((m) => `<option ${m === ai.model ? "selected" : ""}>${m}</option>`).join("")}</select></div><div class="field"><label>Temperatura</label><input class="input" type="number" step="0.1" min="0" max="1" data-ai="temperature" value="${ai.temperature}"/></div></div>
           <div class="field"><label>Máx. tokens</label><input class="input" type="number" data-ai="maxTokens" value="${ai.maxTokens}"/></div>
         </div>

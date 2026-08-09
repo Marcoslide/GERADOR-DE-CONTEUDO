@@ -8,8 +8,17 @@ window.AIProvider = (function () {
   const S = window.Store, U = window.UI;
   function cfg() { return S.get().ai || {}; }
   function isReal() { return cfg().provider === "Claude Real"; }
-  function base() { return (cfg().backendUrl || "").replace(/\/+$/, ""); } // "" = mesma origem
-  function urlOf(p) { return base() + p; }
+  // Normaliza a URL do backend: aceita vazio (mesma origem), só a origem
+  // (http://localhost:3000) ou a URL completa colada por engano
+  // (http://localhost:3000/api/ai/claude) — sem nunca duplicar o caminho.
+  function normalizeAIBackendUrl(url) {
+    if (!url) return "";
+    let clean = String(url).trim().replace(/\/+$/, "");
+    clean = clean.replace(/\/api\/ai\/(claude|status|test)$/, "");
+    return clean.replace(/\/+$/, "");
+  }
+  function base() { return normalizeAIBackendUrl(cfg().backendUrl); } // "" = mesma origem
+  function urlOf(p) { const b = base(); return b ? b + p : p; }
 
   async function status() {
     try { const r = await fetch(urlOf("/api/ai/status")); return await r.json(); }
@@ -104,7 +113,7 @@ window.AIProvider = (function () {
 
   function lastErr() { return lastError; }
   return {
-    isReal, base, status, testConnection, call, withClaude, executeActions, learningContext, lastErr,
+    isReal, base, normalizeAIBackendUrl, status, testConnection, call, withClaude, executeActions, learningContext, lastErr,
     assistantReply, generateScript, generateVariations, generateCampaign, generateCards,
     generateMainSpeech, generateCaption, generateChecklist, generateVisualDirection,
     analyzeContent, generateCorrection, createPublicationPlan,
