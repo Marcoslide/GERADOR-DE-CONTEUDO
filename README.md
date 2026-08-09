@@ -51,6 +51,16 @@ O VIRALIZA foi ajustado para você **informar o básico e a IA gerar o resto** �
 - **Biblioteca reutilizável:** reutilizar em card / nova campanha / variação, além de editar, copiar e apagar.
 - **Inteligência de público:** a IA gera subpúblicos (dor, desejo, linguagem, gancho, CTA, plataforma) na criação de campanha e na Persona, para criar variações por público.
 
+### Inteligência de Mercado / Pesquisa IA
+
+Camada opcional que usa referências externas para gerar conteúdo mais forte (serviço separado em `assets/js/research.js`, pronto para busca real; no MVP a análise é simulada de forma realista por produto/nicho/plataforma).
+
+- **Na criação da campanha:** etapa opcional "Inteligência de Mercado" — adicione vários links (Mercado Livre, Shopee, Amazon, Reels, TikTok…), cole avaliações/perguntas ou informe palavra-chave. A IA analisa e mostra **Oportunidades encontradas** (dúvidas frequentes, objeções, elogios/provas, reclamações e ideias de vídeo), e você clica em **Gerar cards com base nessa análise** — cada card nasce preenchido e com nota de **Potencial (Alto/Médio/Baixo + motivo)**.
+- **No card/roteiro:** ao gerar/ melhorar roteiro, criar variação ou correção, a IA usa a inteligência salva na campanha automaticamente (mostra "Base usada"). Se não houver, pergunta se deve buscar referências (com opção de colar avaliações/perguntas ou "não perguntar de novo"). Botão **🔎 Melhorar com pesquisa** força uma nova análise.
+- **Não copia concorrentes:** extrai apenas inteligência (dúvidas, objeções, provas, ângulos) e transforma em conteúdo original.
+- **Biblioteca:** as descobertas (dúvidas, objeções, provas, cenas de retenção) podem ser salvas e reutilizadas; a IA também consulta a biblioteca.
+- **Arquitetura:** `MarketResearchService`, `MarketplaceAnalyzer`, `SocialResearchService`, `ReferenceAnalyzer`, `ReviewExtractor`, `QuestionExtractor`, `CreativeAnalyzer`, `AudienceBranchService`, `ScriptResearchService` — cada análise retorna um objeto estruturado.
+
 ## Estrutura (8 menus)
 
 1. **Hoje** — tela principal e objetiva: prioridades, ações rápidas, cards do dia, alertas.
@@ -126,6 +136,7 @@ assets/
     seed.js             Dados mockados realistas
     store.js            Estado + persistência (localStorage)
     ai.js               Camada de IA (simulada): campanha, roteiro, visual, correção, público
+    research.js         Inteligência de Mercado / Pesquisa IA (services + análise estruturada)
     components.js       Modal, toast, chat contextual, helpers
     views.js            As 8 telas
     campaign.js         Criar campanha com IA (conversacional)

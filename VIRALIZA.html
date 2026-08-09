@@ -1396,6 +1396,251 @@ window.AI = (function () {
 </script>
   <script>
 /* ============================================================
+   VIRALIZA — Inteligência de Mercado / Pesquisa IA
+   Arquitetura de serviços separada, pronta para busca real.
+   No MVP retorna análise simulada realista por produto/nicho/
+   plataforma. Extrai inteligência (nunca copia concorrente).
+   ============================================================ */
+window.MarketResearch = (function () {
+  const S = window.Store, AI = window.AI;
+  const pick = (a) => a[Math.floor(Math.random() * a.length)];
+  const cap = (s) => (s || "").charAt(0).toUpperCase() + (s || "").slice(1);
+
+  // ---------- Plataforma ----------
+  function detectPlatform(url) {
+    const u = (url || "").toLowerCase();
+    if (/mercadolivre|mercadolibre|\/ml[ab]|produto\.ml/.test(u)) return "Mercado Livre";
+    if (/shopee/.test(u)) return "Shopee";
+    if (/amazon|amzn/.test(u)) return "Amazon";
+    if (/instagram|tiktok|youtube|youtu\.be|facebook|fb\.watch|kwai/.test(u)) return "Social";
+    if (!u) return "Manual";
+    return "Referência";
+  }
+
+  // ---------- Domínio do produto (pools de conteúdo) ----------
+  const POOLS = {
+    decor: {
+      questions: ["Vem com vidro?", "Qual o tamanho real?", "Já vem pronto para pendurar?", "A moldura é de madeira mesmo?", "As cores são fiéis à foto?"],
+      objections: ["Medo de chegar quebrado", "Medo de parecer menor que a foto", "Dúvida sobre o material", "Dúvida sobre instalação", "Medo da cor vir diferente"],
+      praises: ["Clientes elogiam o acabamento", "Clientes dizem que chegou bem embalado", "Clientes dizem que ficou lindo na sala", "Clientes dizem que chegou rápido"],
+      complaints: ["Alguns esperavam um tamanho maior", "Alguns tiveram dúvida sobre a cor real", "Alguns não entenderam a diferença entre variações"],
+      creative: ["Antes e depois da parede sem vida", "Prova de tamanho ao lado do sofá", "Abertura da embalagem reforçada", "Close na moldura/detalhe", "Como pendurar em 1 minuto"],
+    },
+    organizacao: {
+      questions: ["Vai no microondas?", "Veda bem?", "Qual a capacidade?", "É livre de BPA?", "Pode ir no freezer?"],
+      objections: ["Medo de vazar", "Achar caro", "Dúvida se é resistente", "Dúvida se as tampas encaixam"],
+      praises: ["Clientes dizem que organizou a cozinha", "Clientes elogiam a vedação", "Clientes dizem que é bonito e prático", "Chegou rápido"],
+      complaints: ["Alguns esperavam mais peças", "Alguns acharam a tampa diferente da foto"],
+      creative: ["Gaveta bagunçada virando organizada", "Teste de vedação de cabeça para baixo", "Restock de despensa", "Antes e depois da despensa"],
+    },
+    fitness: {
+      questions: ["Qual o sabor mais gostoso?", "Quantas doses rende?", "Tem lactose?", "Serve para iniciante?"],
+      objections: ["Medo de não sentir efeito", "Achar caro", "Dúvida sobre o sabor", "Dúvida se é original"],
+      praises: ["Clientes elogiam o sabor", "Clientes dizem que rende bastante", "Clientes sentiram resultado", "Chegou lacrado"],
+      complaints: ["Alguns acharam doce demais", "Alguns esperavam render mais"],
+      creative: ["Antes e depois de treino", "Preparo do shake em 15s", "Comparação com concorrente", "Rotina real de uso"],
+    },
+    generic: {
+      questions: ["Qual o tamanho/medida?", "É resistente?", "Vem completo?", "Qual o prazo de entrega?", "É original?"],
+      objections: ["Medo de não valer o preço", "Medo de chegar com defeito", "Dúvida sobre a qualidade", "Dúvida se é como na foto"],
+      praises: ["Clientes elogiam a qualidade", "Clientes dizem que chegou rápido", "Clientes dizem que é igual ao anúncio", "Bem embalado"],
+      complaints: ["Alguns esperavam algo diferente", "Alguns tiveram dúvida na hora de escolher a variação"],
+      creative: ["Produto em uso no dia a dia", "Antes e depois", "Unboxing da embalagem", "Comparação de qualidade", "Prova real de resultado"],
+    },
+  };
+  function domain(product, niche) {
+    const t = ((product || "") + " " + (niche || "")).toLowerCase();
+    if (/quadro|decor|parede|moldura|poster|painel/.test(t)) return "decor";
+    if (/pote|organiz|cozinha|casa|cesto|cabide|despensa/.test(t)) return "organizacao";
+    if (/academia|treino|suplemento|whey|fit|creatina|emagrec/.test(t)) return "fitness";
+    return "generic";
+  }
+
+  // ---------- Serviços (arquitetura separada) ----------
+  const ReviewExtractor = { extract: (pool, pasted) => uniq([...(pasted.reviews ? splitLines(pasted.reviews) : []), ...pool.praises]) };
+  const QuestionExtractor = { extract: (pool, pasted) => uniq([...(pasted.questions ? splitLines(pasted.questions) : []), ...pool.questions]) };
+  const CreativeAnalyzer = { analyze: (pool) => pool.creative.slice() };
+  const AudienceBranchService = { branches: (audience) => (window.AI ? AI.generateAudienceBranches(audience) : []) };
+
+  const MarketplaceAnalyzer = {
+    analyze: (input, product, niche) => {
+      const pool = POOLS[domain(product, niche)];
+      const plat = input.detectedPlatform;
+      // prioridade varia por plataforma (ML = perguntas; Shopee = avaliações)
+      const questions = QuestionExtractor.extract(pool, input.pasted || {});
+      const praises = ReviewExtractor.extract(pool, input.pasted || {});
+      return {
+        questions, reviewsPositive: praises, reviewsNegative: pool.complaints.slice(),
+        objections: pool.objections.slice(), praises, complaints: pool.complaints.slice(),
+        creativeInsights: CreativeAnalyzer.analyze(pool),
+      };
+    },
+  };
+  const SocialResearchService = {
+    analyze: (input, product, niche) => {
+      const pool = POOLS[domain(product, niche)];
+      return {
+        questions: [], reviewsPositive: [], reviewsNegative: [], objections: pool.objections.slice(1, 3),
+        praises: [], complaints: [],
+        creativeInsights: ["Gancho forte nos 2 primeiros segundos", "Cena de retenção: " + pick(pool.creative), "Ritmo rápido com cortes secos", "CTA claro no fim", "Formato vertical UGC"],
+      };
+    },
+  };
+  const ReferenceAnalyzer = {
+    analyze: (input, product, niche) => {
+      const plat = input.detectedPlatform;
+      if (plat === "Social") return SocialResearchService.analyze(input, product, niche);
+      return MarketplaceAnalyzer.analyze(input, product, niche);
+    },
+  };
+
+  // analisa UMA fonte → objeto estruturado
+  function analyzeSource(ref, product, niche) {
+    const plat = detectPlatform(ref.url);
+    const input = { detectedPlatform: plat, pasted: ref.pasted || {} };
+    const r = ReferenceAnalyzer.analyze(input, product, niche);
+    return {
+      sourceType: plat, url: ref.url || "", productTitle: product || "", detectedPlatform: plat,
+      questions: r.questions, reviewsPositive: r.reviewsPositive, reviewsNegative: r.reviewsNegative,
+      objections: r.objections, praises: r.praises, complaints: r.complaints,
+      creativeInsights: r.creativeInsights, contentOpportunities: [], suggestedCards: [], audienceBranches: [],
+      confidence: ref.url ? "Média" : "Baixa",
+    };
+  }
+
+  // ---------- Serviço principal ----------
+  // MarketResearchService.analyze({ product, niche, references:[{url,type}], pasted:{}, audience })
+  const MarketResearchService = {
+    analyze: (opts) => {
+      opts = opts || {};
+      const product = opts.product || "produto";
+      const niche = opts.niche || "";
+      const refs = (opts.references || []).filter((r) => r.url);
+      const pasted = opts.pasted || {};
+      const pool = POOLS[domain(product, niche)];
+
+      // agrega perguntas/objeções/elogios/reclamações de todas as fontes + textos colados
+      let questions = [], praises = [], complaints = [], objections = [], creative = [];
+      refs.forEach((r) => { const a = analyzeSource(Object.assign({}, r, { pasted }), product, niche); questions.push(...a.questions); praises.push(...a.praises); complaints.push(...a.complaints); objections.push(...a.objections); creative.push(...a.creativeInsights); });
+      if (!refs.length) { questions = QuestionExtractor.extract(pool, pasted); praises = ReviewExtractor.extract(pool, pasted); objections = pool.objections.slice(); complaints = pool.complaints.slice(); creative = pool.creative.slice(); }
+      if (pasted.questions) questions.unshift(...splitLines(pasted.questions));
+      if (pasted.reviews) praises.unshift(...splitLines(pasted.reviews));
+      if (pasted.comments) questions.push(...splitLines(pasted.comments));
+
+      questions = rank(uniq(questions)); objections = rank(uniq(objections)); praises = rank(uniq(praises)); complaints = rank(uniq(complaints)); creative = uniq(creative);
+
+      const contentOpportunities = buildOpportunities(pool, questions, objections, praises, complaints, creative);
+      const suggestedCards = buildSuggestedCards(product, questions, objections, praises, complaints, creative);
+      const audienceBranches = AudienceBranchService.branches(opts.audience || niche || product);
+      const confidence = refs.length >= 2 ? "Alta" : (refs.length === 1 || hasPasted(pasted)) ? "Média" : "Baixa";
+
+      return {
+        sourceType: refs.length ? refs.map((r) => detectPlatform(r.url)).join(", ") : (hasPasted(pasted) ? "Manual" : "Keyword"),
+        product, niche, detectedPlatform: refs[0] ? detectPlatform(refs[0].url) : "Manual",
+        questions, objections, praises, complaints, creativeInsights: creative,
+        contentOpportunities, suggestedCards, audienceBranches, confidence, createdAt: today(),
+      };
+    },
+  };
+
+  // ScriptResearchService: inteligência para roteiro (usa research salvo ou simula)
+  const ScriptResearchService = {
+    forCard: (card, campaign) => {
+      const research = campaign && campaign.research;
+      if (research) return research;
+      const product = (campaign && campaign.productName) || card.title || "produto";
+      return MarketResearchService.analyze({ product, niche: (campaign && campaign.style) || "", audience: (campaign && campaign.audience) || "" });
+    },
+  };
+
+  // ---------- Oportunidades e cards ----------
+  function buildOpportunities(pool, questions, objections, praises, complaints, creative) {
+    return {
+      duvidas: questions.slice(0, 5),
+      objecoes: objections.slice(0, 4),
+      elogios: praises.slice(0, 4),
+      reclamacoes: complaints.slice(0, 4),
+      ideias: creative.slice(0, 6),
+    };
+  }
+
+  function buildSuggestedCards(product, questions, objections, praises, complaints, creative) {
+    const cards = [];
+    if (questions[0]) cards.push(mkCard("Dúvida", questions[0], product, "Quebra de Objeção", "Alto", "Dúvida muito frequente — vídeo de conversão direta."));
+    if (complaints[0]) cards.push(mkCard("Reclamação", complaints[0], product, "Demonstração", "Alto", "Corrige expectativa errada e evita frustração."));
+    if (praises[0]) cards.push(mkCard("Elogio", praises[0], product, "Prova social", "Médio", "Prova social gera confiança."));
+    if (objections[0]) cards.push(mkCard("Objeção", objections[0], product, "Resposta a objeção", "Alto", "Objeção forte — remove barreira de compra."));
+    if (creative[0]) cards.push(mkCard("Cena forte", creative[0], product, "Antes e depois", "Médio", "Alto potencial visual e de retenção."));
+    if (questions[1]) cards.push(mkCard("Dúvida", questions[1], product, "Demonstração", "Médio", "Segunda dúvida mais comum."));
+    return cards;
+  }
+
+  function mkCard(origin, basis, product, type, potential, potentialReason) {
+    const b = basis.replace(/^Clientes (dizem que |elogiam )/i, "").replace(/^Alguns /i, "");
+    const map = {
+      "Dúvida": { title: `Vídeo — ${basis}`, hook: `Antes de comprar ${product.toLowerCase()}, olha esse detalhe 👇`, screenText: basis, cta: "Tire a dúvida no link 👆" },
+      "Reclamação": { title: `Vídeo — Veja isso antes de comprar`, hook: `Não compre ${product.toLowerCase()} antes de ver isso.`, screenText: cap(b), cta: "Confira os detalhes antes de escolher." },
+      "Elogio": { title: `Vídeo — ${cap(b)}`, hook: `Olha o que os clientes mais falam 👇`, screenText: cap(b), cta: "Compra com confiança pelo link." },
+      "Objeção": { title: `Vídeo — ${cap(b)}?`, hook: `"${b}"? Deixa eu te mostrar a verdade 🛡️`, screenText: cap(b), cta: "Garanta o seu sem medo — link na bio." },
+      "Cena forte": { title: `Vídeo — ${cap(basis)}`, hook: `Espera até o final 👀`, screenText: cap(basis), cta: "Faça igual — link na bio." },
+    };
+    const m = map[origin] || map["Dúvida"];
+    return { title: m.title, type, origin, basis, hook: m.hook, screenText: m.screenText, cta: m.cta, retentionText: "Close no detalhe / momento de virada", potential, potentialReason };
+  }
+
+  // gera cards REAIS no board a partir da análise
+  function generateCardsFromResearch(campaign, analysis) {
+    const ids = [];
+    (analysis.suggestedCards || []).forEach((sc, i) => {
+      const tmp = { type: sc.type, campaignId: campaign.id, title: sc.title, strategy: {}, script: {} };
+      const strategy = AI.generateStrategyForCard(tmp, campaign);
+      strategy.audience = campaign.audience || strategy.audience;
+      const script = Object.assign({}, AI.generateScriptForCard(tmp, campaign), {
+        hook: sc.hook, cta: sc.cta, screenText: [sc.screenText, "Link na bio 👆"],
+        retention: { start: "00:12", end: "00:17", type: "Momento de virada", reason: sc.potentialReason, screenText: sc.screenText },
+      });
+      const id = S.actions.addCard({
+        title: sc.title, type: sc.type, campaignId: campaign.id, channel: (campaign.channels && campaign.channels[i % campaign.channels.length]) || "Instagram",
+        status: "Pronto para gravar", priority: sc.potential === "Alto" ? "Alta" : "Média", objective: campaign.objective, nextAction: "Gravar o gancho",
+        origin: "Inteligência de mercado", basis: sc.origin + ": " + sc.basis, potential: sc.potential, potentialReason: sc.potentialReason,
+        methods: [sc.type], strategy, script, visual: AI.generateVisualDirection(tmp, campaign), checklist: AI.generateChecklistForCard(tmp, campaign),
+      });
+      ids.push(id);
+    });
+    return ids;
+  }
+
+  // salva descobertas na biblioteca
+  function saveToLibrary(analysis) {
+    let n = 0;
+    const add = (type, arr) => (arr || []).forEach((t) => { S.actions.addLibrary({ type, title: t, content: `Descoberta de mercado (${analysis.detectedPlatform}) — ${analysis.product}`, tags: ["mercado"], source: "" }); n++; });
+    add("Dúvida frequente", analysis.contentOpportunities.duvidas);
+    add("Objeção", analysis.contentOpportunities.objecoes);
+    add("Prova social", analysis.contentOpportunities.elogios);
+    add("Reclamação", analysis.contentOpportunities.reclamacoes);
+    add("Cena de retenção", analysis.contentOpportunities.ideias);
+    return n;
+  }
+
+  // ---------- utils ----------
+  function splitLines(t) { return (t || "").split(/[\n;]+/).map((x) => x.trim()).filter((x) => x.length > 2); }
+  function uniq(a) { const seen = new Set(); return a.filter((x) => { const k = x.toLowerCase().trim(); if (seen.has(k)) return false; seen.add(k); return true; }); }
+  function rank(a) { return a; } // no MVP mantém ordem (fontes já priorizadas)
+  function hasPasted(p) { return !!(p && (p.reviews || p.questions || p.comments || p.description || p.keyword)); }
+  function today() { return new Date().toISOString().slice(0, 10); }
+
+  return {
+    detectPlatform, analyzeSource,
+    MarketResearchService, MarketplaceAnalyzer, SocialResearchService, ReferenceAnalyzer,
+    ReviewExtractor, QuestionExtractor, CreativeAnalyzer, AudienceBranchService, ScriptResearchService,
+    analyze: (opts) => MarketResearchService.analyze(opts),
+    generateCardsFromResearch, saveToLibrary,
+  };
+})();
+
+</script>
+  <script>
+/* ============================================================
    R.E.A.L. OS — Componentes de UI (modal, toast, chat, helpers)
    ============================================================ */
 window.UI = (function () {
@@ -1855,7 +2100,7 @@ window.Views = (function () {
     const camp = S.sel.campaign(c.campaignId);
     return `<div class="mini-card" draggable="true" data-card="${c.id}">
       <div class="flex" style="align-items:flex-start;gap:6px"><div class="mc-title" style="flex:1">${esc(c.title)}</div><span class="x-btn" data-cardmenu="${c.id}" title="Ações" style="width:24px;height:24px;font-size:13px">⋮</span></div>
-      <div class="mc-meta"><span class="pill pill-gray">${esc(c.type)}</span> <span class="pill ${U.prioClass(c.priority)}" style="border-color:transparent;background:transparent;padding-left:0">● ${esc(c.priority)}</span></div>
+      <div class="mc-meta"><span class="pill pill-gray">${esc(c.type)}</span> <span class="pill ${U.prioClass(c.priority)}" style="border-color:transparent;background:transparent;padding-left:0">● ${esc(c.priority)}</span>${c.potential ? ` <span class="pill ${c.potential === "Alto" ? "pill-accent" : c.potential === "Médio" ? "pill-amber" : "pill-gray"}">📈 ${esc(c.potential)}</span>` : ""}</div>
       <div class="mc-foot"><span class="avatar">${U.initials(c.responsible)}</span> ${esc(c.channel)}${camp ? " · " + esc(camp.title.slice(0, 16)) : ""}</div>
       <div class="mc-progress"><span style="width:${c.progress}%"></span></div>
     </div>`;
@@ -2855,11 +3100,12 @@ window.Recorder = (function () {
   <script>
 /* ============================================================
    VIRALIZA — Criar campanha com IA (conversacional)
-   Pouca entrada, muita saída: o usuário escolhe por botões e a
-   IA monta a campanha + cards prontos.
+   + Inteligência de Mercado opcional (links, avaliações,
+     perguntas, concorrentes, palavra-chave).
+   Pouca entrada, muita saída.
    ============================================================ */
 window.CampaignWizard = (function () {
-  const S = window.Store, U = window.UI, AI = window.AI, esc = U.esc;
+  const S = window.Store, U = window.UI, AI = window.AI, MR = window.MarketResearch, esc = U.esc;
   let w = null;
 
   const GOALS = ["Vender produto", "Campanha de afiliado", "Gerar vídeos com foto do produto", "Gravar vídeos com teleprompter", "Analisar vídeo já gravado", "Criar conteúdo orgânico", "Marketplace", "Live Shop"];
@@ -2867,56 +3113,142 @@ window.CampaignWizard = (function () {
   const STYLES = ["Direto e vendedor", "Natural estilo UGC", "Antes e depois", "Review", "Demonstração", "Prova social", "Humor leve", "Premium", "Popular", "Educativo", "Urgência/oferta", "Storytelling"];
   const MATERIAL = ["Tenho foto do produto", "Tenho vídeo gravado", "Tenho link de referência", "Tenho link de afiliado", "Tenho só a ideia", "Quero gravar agora"];
   const QUANTITY = ["1 vídeo", "3 vídeos", "5 vídeos", "7 dias de conteúdo", "10 variações"];
+  const LINK_TYPES = ["Meu anúncio", "Concorrente", "Produto referência", "Anúncio campeão", "Review", "Página de vendas", "Vídeo de referência", "Conteúdo de rede social"];
 
   function open(prefill) {
-    w = { text: (prefill && prefill.text) || "", goal: "Vender produto", channels: ["Instagram", "TikTok"], style: "Direto e vendedor", material: [], quantity: "3 vídeos", audience: "" };
+    w = { text: (prefill && prefill.text) || "", goal: "Vender produto", channels: ["Instagram", "TikTok"], style: "Direto e vendedor", material: [], quantity: "3 vídeos", audience: "",
+      showIntel: false, references: [{ url: "", type: "Concorrente" }], pasted: { reviews: "", questions: "", comments: "", description: "", keyword: "" }, research: null };
     renderForm();
   }
 
-  function chips(list, selected, multi, key) {
+  function chips(list, key, multi) {
     const isSel = (v) => multi ? (w[key] || []).includes(v) : w[key] === v;
     return `<div class="chip-select">${list.map((v) => `<div class="chip ${isSel(v) ? "on" : ""}" data-wchip="${key}" data-val="${esc(v)}" data-multi="${multi ? 1 : 0}">${esc(v)}</div>`).join("")}</div>`;
+  }
+
+  function linkRows() {
+    return w.references.map((r, i) => `
+      <div class="flex gap-8" style="margin-bottom:8px">
+        <input class="input" data-refurl="${i}" placeholder="Cole o link (Mercado Livre, Shopee, Amazon, Reels, TikTok…)" value="${esc(r.url)}" style="flex:2"/>
+        <select class="select" data-reftype="${i}" style="flex:1">${LINK_TYPES.map((t) => `<option ${t === r.type ? "selected" : ""}>${esc(t)}</option>`).join("")}</select>
+        ${w.references.length > 1 ? `<span class="x-btn" data-refdel="${i}">✕</span>` : ""}
+      </div>`).join("");
+  }
+
+  function intelSection() {
+    if (!w.showIntel) return `<button class="btn btn-sm" id="w-intel-toggle" style="margin-top:6px">🔎 + Inteligência de Mercado (opcional)</button>`;
+    return `
+      <div class="info-block" style="margin-top:10px"><h4>🔎 Inteligência de Mercado <span class="muted" style="font-weight:400">(opcional)</span></h4>
+        <p class="muted" style="font-size:12px;margin-bottom:10px">Alimente a IA com referências para criar vídeos melhores. A IA extrai dúvidas, objeções e provas — <b>sem copiar concorrentes</b>.</p>
+        <label style="font-size:12px;font-weight:600;color:var(--text-2)">Referências de mercado</label>
+        <div style="margin:8px 0">${linkRows()}</div>
+        <button class="btn btn-xs" id="w-addlink">+ Adicionar outro link</button>
+        <div class="form-row" style="margin-top:12px">
+          <div class="field mb-0"><label>Colar avaliações</label><textarea class="textarea" data-paste="reviews" style="min-height:60px" placeholder="Uma por linha…">${esc(w.pasted.reviews)}</textarea></div>
+          <div class="field mb-0"><label>Colar perguntas de clientes</label><textarea class="textarea" data-paste="questions" style="min-height:60px" placeholder="Uma por linha…">${esc(w.pasted.questions)}</textarea></div>
+        </div>
+        <div class="field" style="margin-top:12px;margin-bottom:0"><label>Palavra-chave do produto/nicho</label><input class="input" data-paste="keyword" value="${esc(w.pasted.keyword)}" placeholder="Ex: quadro decorativo sala"/></div>
+        <button class="btn btn-primary btn-sm mt-16" id="w-analyze">🤖 Analisar referências</button>
+        <button class="btn btn-sm mt-16" id="w-intel-hide" style="margin-left:6px">Ocultar</button>
+      </div>`;
   }
 
   function renderForm() {
     U.modal({
       title: "Criar campanha com IA", size: "wide",
       body: `
-        <div class="msg ai" style="max-width:100%;margin-bottom:16px"><div class="m-ava">✦</div><div class="m-bubble">Me diga em poucas palavras o que você quer criar. Pode ser um produto, uma ideia, um link de afiliado, um vídeo que você já gravou ou uma campanha para gerar vendas.</div></div>
-        <div class="field"><textarea class="textarea" id="w-text" placeholder="Ex: Quero vender um kit de quadros decorativos usando vídeos para Instagram e TikTok.">${esc(w.text)}</textarea></div>
-        <div class="field"><label>O que você quer criar?</label>${chips(GOALS, w.goal, false, "goal")}</div>
-        <div class="field"><label>Onde quer publicar?</label>${chips(CHANNELS, w.channels, true, "channels")}</div>
-        <div class="field"><label>Estilo do vídeo</label>${chips(STYLES, w.style, false, "style")}</div>
-        <div class="field"><label>Material disponível</label>${chips(MATERIAL, w.material, true, "material")}</div>
+        <div class="msg ai" style="max-width:100%;margin-bottom:16px"><div class="m-ava">✦</div><div class="m-bubble">Me diga em poucas palavras o que você quer criar. Pode ser um produto, uma ideia, um link de afiliado ou uma campanha para gerar vendas.</div></div>
+        <div class="field"><textarea class="textarea" id="w-text" placeholder="Ex: Quero vender um kit de quadros decorativos na Shopee e no Instagram.">${esc(w.text)}</textarea></div>
+        <div class="field"><label>O que você quer criar?</label>${chips(GOALS, "goal", false)}</div>
+        <div class="field"><label>Onde quer publicar?</label>${chips(CHANNELS, "channels", true)}</div>
+        <div class="field"><label>Estilo do vídeo</label>${chips(STYLES, "style", false)}</div>
         <div class="form-row">
-          <div class="field"><label>Quantidade desejada</label>${chips(QUANTITY, w.quantity, false, "quantity")}</div>
-          <div class="field"><label>Público (opcional)</label><input class="input" id="w-aud" value="${esc(w.audience)}" placeholder="Ex: mães que querem organizar a cozinha"/></div>
-        </div>`,
+          <div class="field"><label>Material disponível</label>${chips(MATERIAL, "material", true)}</div>
+          <div class="field"><label>Quantidade</label>${chips(QUANTITY, "quantity", false)}</div>
+        </div>
+        <div class="field"><label>Público (opcional)</label><input class="input" id="w-aud" value="${esc(w.audience)}" placeholder="Ex: mães que querem decorar a sala"/></div>
+        ${intelSection()}`,
       foot: `<button class="btn btn-ghost" data-close>Cancelar</button><button class="btn btn-primary" id="w-preview">✦ Gerar prévia com IA</button>`,
+      onMount: bindForm,
+    });
+  }
+
+  function syncForm(o) {
+    if (o.querySelector("#w-text")) w.text = o.querySelector("#w-text").value.trim();
+    if (o.querySelector("#w-aud")) w.audience = o.querySelector("#w-aud").value.trim();
+    o.querySelectorAll("[data-refurl]").forEach((el) => w.references[+el.dataset.refurl].url = el.value.trim());
+    o.querySelectorAll("[data-reftype]").forEach((el) => w.references[+el.dataset.reftype].type = el.value);
+    o.querySelectorAll("[data-paste]").forEach((el) => w.pasted[el.dataset.paste] = el.value);
+  }
+
+  function bindForm(o) {
+    o.querySelectorAll("[data-wchip]").forEach((el) => el.onclick = () => {
+      const key = el.dataset.wchip, val = el.dataset.val, multi = el.dataset.multi === "1";
+      if (multi) { w[key] = w[key] || []; const i = w[key].indexOf(val); i >= 0 ? w[key].splice(i, 1) : w[key].push(val); el.classList.toggle("on"); }
+      else { w[key] = val; o.querySelectorAll(`[data-wchip="${key}"]`).forEach((x) => x.classList.toggle("on", x.dataset.val === val)); }
+    });
+    const tog = o.querySelector("#w-intel-toggle"); if (tog) tog.onclick = () => { syncForm(o); w.showIntel = true; renderForm(); };
+    const hide = o.querySelector("#w-intel-hide"); if (hide) hide.onclick = () => { syncForm(o); w.showIntel = false; renderForm(); };
+    const addlink = o.querySelector("#w-addlink"); if (addlink) addlink.onclick = () => { syncForm(o); w.references.push({ url: "", type: "Concorrente" }); renderForm(); };
+    o.querySelectorAll("[data-refdel]").forEach((el) => el.onclick = () => { syncForm(o); w.references.splice(+el.dataset.refdel, 1); renderForm(); });
+    const analyze = o.querySelector("#w-analyze"); if (analyze) analyze.onclick = () => { syncForm(o); runAnalysis(); };
+    o.querySelector("#w-preview").onclick = () => {
+      syncForm(o);
+      if (!w.text && !w.audience && !hasRefs()) return U.toast("Escreva em poucas palavras o que você quer criar", "warn");
+      w.plan = AI.generateCampaignPlan(w);
+      renderPreview();
+    };
+  }
+
+  function hasRefs() { return w.references.some((r) => r.url) || Object.values(w.pasted).some((v) => v && v.trim()); }
+
+  // ---------- Análise de mercado → Oportunidades ----------
+  function runAnalysis() {
+    if (!hasRefs()) return U.toast("Adicione ao menos um link ou cole avaliações/perguntas", "warn");
+    w.plan = w.plan || AI.generateCampaignPlan(w);
+    U.modal({ title: "Analisando referências", size: "", body: `<div class="vs-analyzing"><div class="vs-spinner"></div><h3 style="color:var(--text-0);margin-top:16px">Analisando anúncios, avaliações e perguntas…</h3><p class="muted" style="margin-top:6px">Extraindo dúvidas, objeções, provas sociais e oportunidades.</p></div>`, foot: "" });
+    setTimeout(() => {
+      w.research = MR.analyze({ product: w.plan.productName, niche: w.style, references: w.references.filter((r) => r.url), pasted: w.pasted, audience: w.audience || w.plan.audience });
+      renderOpportunities();
+    }, 1300);
+  }
+
+  function renderOpportunities() {
+    const a = w.research, op = a.contentOpportunities;
+    const block = (title, ico, arr, cls) => `<div class="info-block"><h4>${ico} ${title}</h4>${arr.length ? arr.map((t) => `<div class="analysis-row" style="padding:7px 0"><span class="ar-ico">•</span><div>${esc(t)}</div></div>`).join("") : '<p class="muted" style="font-size:12px">—</p>'}</div>`;
+    U.modal({
+      title: "Oportunidades encontradas", size: "wide",
+      body: `
+        <div class="flex gap-8 wrap" style="margin-bottom:14px"><span class="pill pill-accent">Confiança: ${esc(a.confidence)}</span><span class="pill pill-gray">${esc(a.sourceType)}</span><span class="pill pill-blue">${(a.suggestedCards || []).length} ideias de vídeo</span></div>
+        <div class="alert good" style="margin-bottom:14px"><span class="al-ico">🛡️</span><div class="al-body" style="font-size:12px">A IA extrai inteligência (dúvidas, objeções, provas) e transforma em conteúdo <b>original</b> — nunca copia texto, imagem ou vídeo de concorrente. <span class="muted">Pesquisa simulada no MVP. Estrutura pronta para busca real.</span></div></div>
+        <div class="grid grid-2" style="align-items:start">
+          ${block("Dúvidas frequentes", "❓", op.duvidas)}
+          ${block("Objeções", "🛡️", op.objecoes)}
+          ${block("Elogios / provas sociais", "⭐", op.elogios)}
+          ${block("Reclamações / alertas", "⚠️", op.reclamacoes)}
+        </div>
+        <div class="info-block mb-0"><h4>🎬 Ideias de vídeos</h4>
+          ${(a.suggestedCards || []).map((sc) => `<div class="scene-card"><div class="scene-top"><span class="pill pill-accent">${esc(sc.origin)}</span><span class="pill pill-gray">${esc(sc.type)}</span><span class="pill ${sc.potential === "Alto" ? "pill-accent" : "pill-amber"}">Potencial: ${esc(sc.potential)}</span></div><div class="scene-reason"><b>${esc(sc.title)}</b> — ${esc(sc.potentialReason)}</div><div class="scene-screen"><span class="tp-label" style="color:var(--text-3)">Gancho</span>${esc(sc.hook)}</div></div>`).join("")}</div>`,
+      foot: `<button class="btn btn-sm" id="op-more">+ Adicionar mais links</button>
+        <button class="btn btn-sm" id="op-lib">📚 Salvar descobertas</button>
+        <button class="btn btn-ghost btn-sm" id="op-skip">Pular</button>
+        <button class="btn btn-primary" id="op-cards">✨ Gerar cards com base nessa análise</button>`,
       onMount: (o) => {
-        o.querySelectorAll("[data-wchip]").forEach((el) => el.onclick = () => {
-          const key = el.dataset.wchip, val = el.dataset.val, multi = el.dataset.multi === "1";
-          if (multi) { w[key] = w[key] || []; const i = w[key].indexOf(val); i >= 0 ? w[key].splice(i, 1) : w[key].push(val); el.classList.toggle("on"); }
-          else { w[key] = val; o.querySelectorAll(`[data-wchip="${key}"]`).forEach((x) => x.classList.toggle("on", x.dataset.val === val)); }
-        });
-        o.querySelector("#w-preview").onclick = () => {
-          w.text = o.querySelector("#w-text").value.trim();
-          w.audience = o.querySelector("#w-aud").value.trim();
-          if (!w.text && !w.audience) return U.toast("Escreva em poucas palavras o que você quer criar", "warn");
-          w.plan = AI.generateCampaignPlan(w);
-          renderPreview();
-        };
+        o.querySelector("#op-more").onclick = () => renderForm();
+        o.querySelector("#op-lib").onclick = () => { const n = MR.saveToLibrary(a); U.toast(n + " descobertas salvas na biblioteca ✓"); };
+        o.querySelector("#op-skip").onclick = () => renderPreview();
+        o.querySelector("#op-cards").onclick = () => createFromResearch();
       },
     });
   }
 
+  // ---------- Prévia ----------
   function renderPreview() {
     const p = w.plan;
-    const branches = AI.generateAudienceBranches(p.audience);
+    const branches = (w.research && w.research.audienceBranches) || AI.generateAudienceBranches(p.audience);
     const willGen = [
       `${p.cardPlan.length} cards de vídeo prontos`, `${p.cardPlan.length} roteiros com gancho e cena de retenção`,
-      `sequência de stories`, `checklist de gravação`, `direção de visual (roupa, ambiente, enquadramento)`,
-      `legenda, hashtags e CTA`, `plano de publicação em ${p.channels.join(", ")}`,
+      `sequência de stories`, `checklist de gravação`, `direção de visual`, `legenda, hashtags e CTA`, `plano de publicação em ${p.channels.join(", ")}`,
     ];
     U.modal({
       title: "Prévia da campanha", size: "wide",
@@ -2926,57 +3258,70 @@ window.CampaignWizard = (function () {
             <div class="kv">
               <div class="k">Produto/oferta</div><div class="v">${esc(p.productName)} — ${esc(p.offer)}</div>
               <div class="k">Objetivo</div><div class="v">${esc(p.objective)}</div>
-              <div class="k">Público inicial</div><div class="v">${esc(p.audience)}</div>
+              <div class="k">Público</div><div class="v">${esc(p.audience)}</div>
               <div class="k">Canais</div><div class="v">${p.channels.join(", ")}</div>
               <div class="k">Estilo</div><div class="v">${esc(p.style)}</div>
               <div class="k">Quantidade</div><div class="v">${p.cardPlan.length} conteúdos</div>
-              <div class="k">Materiais</div><div class="v">${(p.materials || []).join(", ") || "—"}</div>
+              ${w.research ? `<div class="k">Inteligência</div><div class="v"><span class="pill pill-accent">${(w.research.suggestedCards || []).length} oportunidades de mercado</span></div>` : ""}
             </div>
           </div>
           <div class="info-block"><h4>✨ O Viraliza vai gerar</h4>
             ${willGen.map((g) => `<div class="analysis-row" style="padding:7px 0"><span class="ar-ico">✓</span><div>${esc(g)}</div></div>`).join("")}
-            <div class="tag-row" style="margin-top:10px">${p.cardPlan.map((c) => `<span class="pill pill-gray">${esc(c.type)}</span>`).join("")}</div>
           </div>
         </div>
-        <div class="info-block mb-0"><h4>👥 Subpúblicos sugeridos <span class="muted" style="font-weight:400">(crie variações por público)</span></h4>
+        ${w.research ? `<div class="alert good"><span class="al-ico">🔎</span><div class="al-body" style="font-size:12px">Inteligência de mercado aplicada: os cards vão usar dúvidas e objeções reais encontradas na análise.</div></div>` : ""}
+        <div class="info-block mb-0"><h4>👥 Subpúblicos sugeridos</h4>
           <div class="tag-row">${branches.slice(0, 6).map((b, i) => `<span class="chip" data-branch="${i}">${esc(b.name)}</span>`).join("")}</div>
           <div id="w-branch-detail"></div>
         </div>`,
       foot: `<button class="btn btn-ghost" data-close>Cancelar</button>
-        <button class="btn btn-sm" id="w-back">← Ajustar com IA</button>
+        <button class="btn btn-sm" id="w-back">← Ajustar</button>
+        ${w.research ? "" : `<button class="btn btn-sm" id="w-intel2">🔎 Inteligência de mercado</button>`}
         <button class="btn btn-primary" id="w-create">✓ Criar campanha</button>`,
       onMount: (o) => {
         o.querySelector("#w-back").onclick = () => renderForm();
         o.querySelector("#w-create").onclick = () => create();
+        const i2 = o.querySelector("#w-intel2"); if (i2) i2.onclick = () => { w.showIntel = true; renderForm(); };
         o.querySelectorAll("[data-branch]").forEach((el) => el.onclick = () => {
           const b = branches[+el.dataset.branch];
           o.querySelectorAll("[data-branch]").forEach((x) => x.classList.remove("on")); el.classList.add("on");
           o.querySelector("#w-branch-detail").innerHTML = `
             <div class="scene-card" style="margin-top:12px">
               <div class="scene-top"><span class="pill pill-accent">${esc(b.name)}</span><span class="pill pill-gray">${esc(b.videoType)}</span><span class="pill pill-blue">${esc(b.platform)}</span></div>
-              <div class="kv" style="margin-top:6px"><div class="k">Dor</div><div class="v">${esc(b.pain)}</div><div class="k">Desejo</div><div class="v">${esc(b.desire)}</div><div class="k">Linguagem</div><div class="v">${esc(b.language)}</div><div class="k">Gancho</div><div class="v">${esc(b.hook)}</div><div class="k">CTA</div><div class="v">${esc(b.cta)}</div></div>
-              <div class="flex gap-8 wrap" style="margin-top:10px"><button class="btn btn-xs" data-buse="${el.dataset.branch}">Usar este público</button><button class="btn btn-xs" data-blib="${el.dataset.branch}">Salvar na biblioteca</button></div>
+              <div class="kv" style="margin-top:6px"><div class="k">Dor</div><div class="v">${esc(b.pain)}</div><div class="k">Gancho</div><div class="v">${esc(b.hook)}</div><div class="k">CTA</div><div class="v">${esc(b.cta)}</div></div>
+              <button class="btn btn-xs mt-16" data-blib="${el.dataset.branch}">Salvar na biblioteca</button>
             </div>`;
-          o.querySelector(`[data-buse="${el.dataset.branch}"]`).onclick = () => { w.plan.audience = b.name; U.toast("Público atualizado para: " + b.name); o.querySelectorAll(".kv .v")[2] && null; renderPreview(); };
-          o.querySelector(`[data-blib="${el.dataset.branch}"]`).onclick = () => { S.actions.addLibrary({ type: "Públicos/subpúblicos", title: b.name, content: `Dor: ${b.pain}. Desejo: ${b.desire}. Gancho: ${b.hook}. CTA: ${b.cta}. Plataforma: ${b.platform}.`, tags: ["público"] }); U.toast("Subpúblico salvo na biblioteca ✓"); };
+          o.querySelector(`[data-blib="${el.dataset.branch}"]`).onclick = () => { S.actions.addLibrary({ type: "Subpúblico", title: b.name, content: `Dor: ${b.pain}. Gancho: ${b.hook}. CTA: ${b.cta}. Plataforma: ${b.platform}.`, tags: ["público"] }); U.toast("Subpúblico salvo ✓"); };
         });
       },
     });
   }
 
-  function create() {
+  // ---------- Criação ----------
+  function newCampaign() {
     const p = w.plan;
     const id = S.actions.addCampaign({
       title: p.title, type: p.type, objective: p.objective, productName: p.productName, offer: p.offer,
       audience: p.audience, promise: p.promise, emotion: p.emotion, cta: p.cta, channels: p.channels,
-      style: p.style, videosPerDay: 2, status: "Ativa",
-      startDate: new Date().toISOString().slice(0, 10), endDate: "",
+      style: p.style, videosPerDay: 2, status: "Ativa", startDate: new Date().toISOString().slice(0, 10), endDate: "",
     });
-    const camp = S.sel.campaign(id);
-    const cardIds = AI.generateCardsForCampaign(camp, p.cardPlan);
-    U.closeModal();
-    U.toast(`Campanha criada com ${cardIds.length} cards prontos ✓`);
-    location.hash = "#/campanha/" + id;
+    if (w.research) S.actions.updateCampaign(id, { research: w.research });
+    return S.sel.campaign(id);
+  }
+
+  function create() {
+    const camp = newCampaign();
+    const ids = AI.generateCardsForCampaign(camp, w.plan.cardPlan);
+    U.closeModal(); U.toast(`Campanha criada com ${ids.length} cards prontos ✓`);
+    location.hash = "#/campanha/" + camp.id;
+  }
+
+  function createFromResearch() {
+    w.plan = w.plan || AI.generateCampaignPlan(w);
+    const camp = newCampaign();
+    const ids = MR.generateCardsFromResearch(camp, w.research);
+    U.closeModal(); U.toast(`Campanha criada com ${ids.length} cards a partir da inteligência de mercado ✓`);
+    location.hash = "#/campanha/" + camp.id;
   }
 
   return { open };
@@ -3056,8 +3401,10 @@ window.CardView = (function () {
     const s = c.strategy || {};
     const v = c.visual || {};
     const origin = c.originCardId ? S.sel.card(c.originCardId) : null;
+    const potCls = { "Alto": "pill-accent", "Médio": "pill-amber", "Baixo": "pill-gray" }[c.potential] || "pill-gray";
     return `
       ${origin ? `<div class="alert info" style="margin-bottom:14px"><span class="al-ico">🛠️</span><div class="al-body" style="font-size:12px">Card de correção de <b>${esc(origin.title)}</b>${c.correctionReason ? " · motivo: " + esc(c.correctionReason) : ""}</div></div>` : ""}
+      ${c.potential || c.origin ? `<div class="alert good" style="margin-bottom:14px"><span class="al-ico">${c.potential ? "📈" : "🔎"}</span><div class="al-body" style="font-size:12px">${c.potential ? `<span class="pill ${potCls}">Potencial: ${esc(c.potential)}</span> ${esc(c.potentialReason || "")}` : ""}${c.origin ? `<div class="muted" style="margin-top:4px">Origem: ${esc(c.origin)}${c.basis ? " · " + esc(c.basis) : ""}</div>` : ""}</div></div>` : ""}
       <div class="grid" style="grid-template-columns:1fr 1fr;align-items:start">
         <div>
           <div class="info-block"><h4>⚡ Próxima ação</h4>
@@ -3246,10 +3593,13 @@ window.CardView = (function () {
   function tRoteiro(c) {
     const s = c.script || {};
     const hasScript = !!(s.hook || s.mainLine);
-    const gen = [["gen-script", "✨ Gerar roteiro completo"], ["gen-hooks", "🪝 Gerar 3 ganchos"], ["gen-stories", "📲 Gerar stories"], ["gen-audience-var", "👥 Variação por público"], ["versao-curta", "⏱️ Versão curta"], ["versao-anuncio", "📢 Versão anúncio"], ["salvar-lib", "📚 Salvar na biblioteca"]];
+    const gen = [["gen-script", "✨ Gerar roteiro completo"], ["gen-hooks", "🪝 Gerar 3 ganchos"], ["gen-stories", "📲 Gerar stories"], ["research-roteiro", "🔎 Melhorar com pesquisa"], ["gen-audience-var", "👥 Variação por público"], ["versao-curta", "⏱️ Versão curta"], ["versao-anuncio", "📢 Versão anúncio"], ["salvar-lib", "📚 Salvar na biblioteca"]];
     const tools = [["melhorar-gancho", "Melhorar gancho"], ["mais-direto", "Mais direto"], ["mais-popular", "Mais popular"], ["mais-emocional", "Mais emocional"], ["mais-vendedor", "Mais vendedor"], ["variacao", "Transformar em variação"]];
+    const camp = S.sel.campaign(c.campaignId);
+    const research = camp && camp.research;
     return `
       <div class="info-block" style="padding:12px 14px"><div class="flex gap-8 wrap">${gen.map(([a, l]) => `<button class="btn btn-sm" data-ca="${a}">${l}</button>`).join("")}</div></div>
+      ${research ? `<div class="info-block" style="padding:12px 14px"><h4 style="margin-bottom:8px">🔎 Base usada (inteligência de mercado)</h4><div class="flex gap-8 wrap">${(research.contentOpportunities.duvidas.slice(0, 1)).map((t) => `<span class="pill pill-blue">Dúvida: ${esc(t)}</span>`).join("")}${(research.contentOpportunities.objecoes.slice(0, 1)).map((t) => `<span class="pill pill-amber">Objeção: ${esc(t)}</span>`).join("")}${(research.contentOpportunities.elogios.slice(0, 1)).map((t) => `<span class="pill pill-accent">Prova: ${esc(t)}</span>`).join("")}<span class="pill pill-gray">Público: ${esc(c.strategy && c.strategy.audience || camp.audience || "")}</span></div></div>` : ""}
       ${s.retention ? `<div class="alert good" style="margin-bottom:14px"><span class="al-ico">🎯</span><div class="al-body" style="font-size:12px"><b>Cena de retenção:</b> ${esc(s.retention.start)}–${esc(s.retention.end)} · ${esc(s.retention.type)} — “${esc(s.retention.screenText)}”</div></div>` : ""}
       ${hasScript ? "" : `<div class="empty" style="padding:20px"><div class="e-ico">📝</div><h3>Sem roteiro ainda</h3><p>Clique em <b>Gerar roteiro completo</b> — a IA cria gancho, cena de retenção, fala, texto na tela, CTA, legenda e hashtags.</p></div>`}
       <div class="flex gap-8 wrap" style="margin-bottom:16px">${tools.map(([a, l]) => `<button class="btn btn-xs" data-rt="${a}">${l}</button>`).join("")}</div>
@@ -3635,6 +3985,73 @@ window.CardView = (function () {
     };
   }
 
+  // ---------- Pesquisa IA / Inteligência de mercado ----------
+  // Usa research salvo na campanha; se não houver, pergunta (uma vez por campanha).
+  function maybeResearch(c, cb) {
+    const camp = S.sel.campaign(c.campaignId);
+    if (!camp) return cb(null);
+    if (camp.research) return cb(camp.research);
+    if (camp.researchOptOut) return cb(null);
+    U.modal({
+      title: "Deixar esse roteiro mais forte?", size: "",
+      body: `<p style="color:var(--text-1);line-height:1.6;margin-bottom:6px">Quer que eu busque referências de mercado (dúvidas, objeções e provas reais) para deixar esse roteiro mais forte?</p>
+        <p class="muted" style="font-size:12px">Pesquisa simulada no MVP. Estrutura pronta para busca real.</p>`,
+      foot: `<button class="btn btn-ghost btn-sm" data-rq="never">Não perguntar de novo</button>
+        <button class="btn btn-sm" data-rq="paste">Vou colar avaliações</button>
+        <button class="btn btn-sm" data-rq="camp">Usar só a campanha</button>
+        <button class="btn btn-primary btn-sm" data-rq="yes">Sim, buscar referências</button>`,
+      onMount: (o) => {
+        o.querySelector("[data-rq='yes']").onclick = () => { U.closeModal(); const r = runResearch(camp, null); cb(r); };
+        o.querySelector("[data-rq='camp']").onclick = () => { U.closeModal(); cb(null); };
+        o.querySelector("[data-rq='never']").onclick = () => { U.closeModal(); S.actions.updateCampaign(camp.id, { researchOptOut: true }); cb(null); };
+        o.querySelector("[data-rq='paste']").onclick = () => { U.closeModal(); pasteResearch(camp, cb); };
+      },
+    });
+  }
+
+  function pasteResearch(camp, cb) {
+    U.modal({
+      title: "Colar avaliações / perguntas", size: "",
+      body: `<div class="field"><label>Avaliações (uma por linha)</label><textarea class="textarea" id="pr-reviews" placeholder="Chegou rápido…"></textarea></div>
+        <div class="field mb-0"><label>Perguntas de clientes (uma por linha)</label><textarea class="textarea" id="pr-questions" placeholder="Vem com vidro?…"></textarea></div>`,
+      foot: `<button class="btn btn-ghost" data-close>Cancelar</button><button class="btn btn-primary" id="pr-go">🤖 Analisar</button>`,
+      onMount: (o) => o.querySelector("#pr-go").onclick = () => {
+        const pasted = { reviews: o.querySelector("#pr-reviews").value, questions: o.querySelector("#pr-questions").value };
+        U.closeModal(); const r = runResearch(camp, pasted); cb(r);
+      },
+    });
+  }
+
+  function runResearch(camp, pasted) {
+    const research = window.MarketResearch.analyze({ product: camp.productName || camp.title, niche: camp.style, references: (camp.references || []), pasted: pasted || {}, audience: camp.audience });
+    S.actions.updateCampaign(camp.id, { research });
+    U.toast("Pesquisa concluída (simulada) ✓ — inteligência aplicada");
+    return research;
+  }
+
+  // Botão "Melhorar com pesquisa": força nova pesquisa e regenera roteiro
+  function doResearch(c) {
+    const camp = S.sel.campaign(c.campaignId);
+    if (!camp) return U.toast("Card sem campanha", "warn");
+    const research = runResearch(camp, null);
+    let ns = applyResearch(AI.generateScriptForCard(c, camp), research);
+    S.actions.updateCard(cardId, { script: ns });
+    refreshBody();
+  }
+
+  // Aplica a inteligência de mercado no roteiro (gancho, texto na tela, retenção)
+  function applyResearch(script, research) {
+    const sc = (research.suggestedCards || [])[0];
+    if (sc) {
+      script.hook = sc.hook;
+      script.screenText = [sc.screenText, "Link na bio 👆"];
+      script.retention = { start: "00:12", end: "00:17", type: "Momento de virada", reason: sc.potentialReason, screenText: sc.screenText };
+    }
+    const obj = (research.contentOpportunities.objecoes || [])[0];
+    if (obj && script.cutPhrases) script.cutPhrases = [obj, ...(script.cutPhrases || [])].slice(0, 3);
+    return script;
+  }
+
   // Novo card de correção vinculado
   function createCorrectionCard(c, reason) {
     const camp = S.sel.campaign(c.campaignId) || {};
@@ -3694,8 +4111,9 @@ window.CardView = (function () {
       case "new-strategy": { const camp = S.sel.campaign(c.campaignId) || {}; S.actions.updateCard(cardId, { strategy: AI.generateStrategyForCard(c, camp) }); U.toast("Nova estratégia gerada pela IA ✓"); refreshBody(); break; }
       case "strategy-to-script": { const camp = S.sel.campaign(c.campaignId) || {}; S.actions.updateCard(cardId, { script: AI.generateScriptForCard(c, camp) }); U.toast("Estratégia aplicada no roteiro ✓"); tab = "Roteiro"; render(); break; }
       case "gen-visual": { const camp = S.sel.campaign(c.campaignId) || {}; S.actions.updateCard(cardId, { visual: AI.generateVisualDirection(c, camp) }); U.toast("Visual do vídeo gerado pela IA ✓"); refreshBody(); break; }
-      case "gen-script": { const camp = S.sel.campaign(c.campaignId) || {}; S.actions.updateCard(cardId, { script: AI.generateScriptForCard(c, camp) }); U.toast("Roteiro completo gerado ✓"); refreshBody(); break; }
-      case "gen-hooks": { const camp = S.sel.campaign(c.campaignId) || {}; const ns = AI.generateScriptForCard(c, camp); S.actions.patchCard(cardId, "script.hook", ns.hook); S.actions.patchCard(cardId, "script.hookAlt1", ns.hookAlt1); S.actions.patchCard(cardId, "script.hookAlt2", ns.hookAlt2); U.toast("3 ganchos gerados ✓"); refreshBody(); break; }
+      case "gen-script": maybeResearch(c, (research) => { const camp = S.sel.campaign(c.campaignId) || {}; let ns = AI.generateScriptForCard(c, camp); if (research) ns = applyResearch(ns, research); S.actions.updateCard(cardId, { script: ns }); U.toast("Roteiro completo gerado ✓"); refreshBody(); }); break;
+      case "gen-hooks": maybeResearch(c, (research) => { const camp = S.sel.campaign(c.campaignId) || {}; let ns = AI.generateScriptForCard(c, camp); if (research) ns = applyResearch(ns, research); S.actions.patchCard(cardId, "script.hook", ns.hook); S.actions.patchCard(cardId, "script.hookAlt1", ns.hookAlt1); S.actions.patchCard(cardId, "script.hookAlt2", ns.hookAlt2); U.toast("3 ganchos gerados ✓"); refreshBody(); }); break;
+      case "research-roteiro": doResearch(c); break;
       case "gen-stories": { const camp = S.sel.campaign(c.campaignId) || {}; S.actions.patchCard(cardId, "script.stories", AI.generateStoriesForCard(c, camp).join("\n")); U.toast("Stories gerados ✓"); refreshBody(); break; }
       case "gen-audience-var": genAudienceVariation(c); break;
       case "versao-curta": U.simulated("Versão curta", "Versão de 10s criada como variação."); break;

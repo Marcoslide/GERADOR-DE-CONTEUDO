@@ -259,7 +259,7 @@ window.Views = (function () {
     const camp = S.sel.campaign(c.campaignId);
     return `<div class="mini-card" draggable="true" data-card="${c.id}">
       <div class="flex" style="align-items:flex-start;gap:6px"><div class="mc-title" style="flex:1">${esc(c.title)}</div><span class="x-btn" data-cardmenu="${c.id}" title="Ações" style="width:24px;height:24px;font-size:13px">⋮</span></div>
-      <div class="mc-meta"><span class="pill pill-gray">${esc(c.type)}</span> <span class="pill ${U.prioClass(c.priority)}" style="border-color:transparent;background:transparent;padding-left:0">● ${esc(c.priority)}</span></div>
+      <div class="mc-meta"><span class="pill pill-gray">${esc(c.type)}</span> <span class="pill ${U.prioClass(c.priority)}" style="border-color:transparent;background:transparent;padding-left:0">● ${esc(c.priority)}</span>${c.potential ? ` <span class="pill ${c.potential === "Alto" ? "pill-accent" : c.potential === "Médio" ? "pill-amber" : "pill-gray"}">📈 ${esc(c.potential)}</span>` : ""}</div>
       <div class="mc-foot"><span class="avatar">${U.initials(c.responsible)}</span> ${esc(c.channel)}${camp ? " · " + esc(camp.title.slice(0, 16)) : ""}</div>
       <div class="mc-progress"><span style="width:${c.progress}%"></span></div>
     </div>`;

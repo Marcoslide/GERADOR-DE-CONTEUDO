@@ -70,8 +70,10 @@ window.CardView = (function () {
     const s = c.strategy || {};
     const v = c.visual || {};
     const origin = c.originCardId ? S.sel.card(c.originCardId) : null;
+    const potCls = { "Alto": "pill-accent", "Médio": "pill-amber", "Baixo": "pill-gray" }[c.potential] || "pill-gray";
     return `
       ${origin ? `<div class="alert info" style="margin-bottom:14px"><span class="al-ico">🛠️</span><div class="al-body" style="font-size:12px">Card de correção de <b>${esc(origin.title)}</b>${c.correctionReason ? " · motivo: " + esc(c.correctionReason) : ""}</div></div>` : ""}
+      ${c.potential || c.origin ? `<div class="alert good" style="margin-bottom:14px"><span class="al-ico">${c.potential ? "📈" : "🔎"}</span><div class="al-body" style="font-size:12px">${c.potential ? `<span class="pill ${potCls}">Potencial: ${esc(c.potential)}</span> ${esc(c.potentialReason || "")}` : ""}${c.origin ? `<div class="muted" style="margin-top:4px">Origem: ${esc(c.origin)}${c.basis ? " · " + esc(c.basis) : ""}</div>` : ""}</div></div>` : ""}
       <div class="grid" style="grid-template-columns:1fr 1fr;align-items:start">
         <div>
           <div class="info-block"><h4>⚡ Próxima ação</h4>
@@ -260,10 +262,13 @@ window.CardView = (function () {
   function tRoteiro(c) {
     const s = c.script || {};
     const hasScript = !!(s.hook || s.mainLine);
-    const gen = [["gen-script", "✨ Gerar roteiro completo"], ["gen-hooks", "🪝 Gerar 3 ganchos"], ["gen-stories", "📲 Gerar stories"], ["gen-audience-var", "👥 Variação por público"], ["versao-curta", "⏱️ Versão curta"], ["versao-anuncio", "📢 Versão anúncio"], ["salvar-lib", "📚 Salvar na biblioteca"]];
+    const gen = [["gen-script", "✨ Gerar roteiro completo"], ["gen-hooks", "🪝 Gerar 3 ganchos"], ["gen-stories", "📲 Gerar stories"], ["research-roteiro", "🔎 Melhorar com pesquisa"], ["gen-audience-var", "👥 Variação por público"], ["versao-curta", "⏱️ Versão curta"], ["versao-anuncio", "📢 Versão anúncio"], ["salvar-lib", "📚 Salvar na biblioteca"]];
     const tools = [["melhorar-gancho", "Melhorar gancho"], ["mais-direto", "Mais direto"], ["mais-popular", "Mais popular"], ["mais-emocional", "Mais emocional"], ["mais-vendedor", "Mais vendedor"], ["variacao", "Transformar em variação"]];
+    const camp = S.sel.campaign(c.campaignId);
+    const research = camp && camp.research;
     return `
       <div class="info-block" style="padding:12px 14px"><div class="flex gap-8 wrap">${gen.map(([a, l]) => `<button class="btn btn-sm" data-ca="${a}">${l}</button>`).join("")}</div></div>
+      ${research ? `<div class="info-block" style="padding:12px 14px"><h4 style="margin-bottom:8px">🔎 Base usada (inteligência de mercado)</h4><div class="flex gap-8 wrap">${(research.contentOpportunities.duvidas.slice(0, 1)).map((t) => `<span class="pill pill-blue">Dúvida: ${esc(t)}</span>`).join("")}${(research.contentOpportunities.objecoes.slice(0, 1)).map((t) => `<span class="pill pill-amber">Objeção: ${esc(t)}</span>`).join("")}${(research.contentOpportunities.elogios.slice(0, 1)).map((t) => `<span class="pill pill-accent">Prova: ${esc(t)}</span>`).join("")}<span class="pill pill-gray">Público: ${esc(c.strategy && c.strategy.audience || camp.audience || "")}</span></div></div>` : ""}
       ${s.retention ? `<div class="alert good" style="margin-bottom:14px"><span class="al-ico">🎯</span><div class="al-body" style="font-size:12px"><b>Cena de retenção:</b> ${esc(s.retention.start)}–${esc(s.retention.end)} · ${esc(s.retention.type)} — “${esc(s.retention.screenText)}”</div></div>` : ""}
       ${hasScript ? "" : `<div class="empty" style="padding:20px"><div class="e-ico">📝</div><h3>Sem roteiro ainda</h3><p>Clique em <b>Gerar roteiro completo</b> — a IA cria gancho, cena de retenção, fala, texto na tela, CTA, legenda e hashtags.</p></div>`}
       <div class="flex gap-8 wrap" style="margin-bottom:16px">${tools.map(([a, l]) => `<button class="btn btn-xs" data-rt="${a}">${l}</button>`).join("")}</div>
@@ -649,6 +654,73 @@ window.CardView = (function () {
     };
   }
 
+  // ---------- Pesquisa IA / Inteligência de mercado ----------
+  // Usa research salvo na campanha; se não houver, pergunta (uma vez por campanha).
+  function maybeResearch(c, cb) {
+    const camp = S.sel.campaign(c.campaignId);
+    if (!camp) return cb(null);
+    if (camp.research) return cb(camp.research);
+    if (camp.researchOptOut) return cb(null);
+    U.modal({
+      title: "Deixar esse roteiro mais forte?", size: "",
+      body: `<p style="color:var(--text-1);line-height:1.6;margin-bottom:6px">Quer que eu busque referências de mercado (dúvidas, objeções e provas reais) para deixar esse roteiro mais forte?</p>
+        <p class="muted" style="font-size:12px">Pesquisa simulada no MVP. Estrutura pronta para busca real.</p>`,
+      foot: `<button class="btn btn-ghost btn-sm" data-rq="never">Não perguntar de novo</button>
+        <button class="btn btn-sm" data-rq="paste">Vou colar avaliações</button>
+        <button class="btn btn-sm" data-rq="camp">Usar só a campanha</button>
+        <button class="btn btn-primary btn-sm" data-rq="yes">Sim, buscar referências</button>`,
+      onMount: (o) => {
+        o.querySelector("[data-rq='yes']").onclick = () => { U.closeModal(); const r = runResearch(camp, null); cb(r); };
+        o.querySelector("[data-rq='camp']").onclick = () => { U.closeModal(); cb(null); };
+        o.querySelector("[data-rq='never']").onclick = () => { U.closeModal(); S.actions.updateCampaign(camp.id, { researchOptOut: true }); cb(null); };
+        o.querySelector("[data-rq='paste']").onclick = () => { U.closeModal(); pasteResearch(camp, cb); };
+      },
+    });
+  }
+
+  function pasteResearch(camp, cb) {
+    U.modal({
+      title: "Colar avaliações / perguntas", size: "",
+      body: `<div class="field"><label>Avaliações (uma por linha)</label><textarea class="textarea" id="pr-reviews" placeholder="Chegou rápido…"></textarea></div>
+        <div class="field mb-0"><label>Perguntas de clientes (uma por linha)</label><textarea class="textarea" id="pr-questions" placeholder="Vem com vidro?…"></textarea></div>`,
+      foot: `<button class="btn btn-ghost" data-close>Cancelar</button><button class="btn btn-primary" id="pr-go">🤖 Analisar</button>`,
+      onMount: (o) => o.querySelector("#pr-go").onclick = () => {
+        const pasted = { reviews: o.querySelector("#pr-reviews").value, questions: o.querySelector("#pr-questions").value };
+        U.closeModal(); const r = runResearch(camp, pasted); cb(r);
+      },
+    });
+  }
+
+  function runResearch(camp, pasted) {
+    const research = window.MarketResearch.analyze({ product: camp.productName || camp.title, niche: camp.style, references: (camp.references || []), pasted: pasted || {}, audience: camp.audience });
+    S.actions.updateCampaign(camp.id, { research });
+    U.toast("Pesquisa concluída (simulada) ✓ — inteligência aplicada");
+    return research;
+  }
+
+  // Botão "Melhorar com pesquisa": força nova pesquisa e regenera roteiro
+  function doResearch(c) {
+    const camp = S.sel.campaign(c.campaignId);
+    if (!camp) return U.toast("Card sem campanha", "warn");
+    const research = runResearch(camp, null);
+    let ns = applyResearch(AI.generateScriptForCard(c, camp), research);
+    S.actions.updateCard(cardId, { script: ns });
+    refreshBody();
+  }
+
+  // Aplica a inteligência de mercado no roteiro (gancho, texto na tela, retenção)
+  function applyResearch(script, research) {
+    const sc = (research.suggestedCards || [])[0];
+    if (sc) {
+      script.hook = sc.hook;
+      script.screenText = [sc.screenText, "Link na bio 👆"];
+      script.retention = { start: "00:12", end: "00:17", type: "Momento de virada", reason: sc.potentialReason, screenText: sc.screenText };
+    }
+    const obj = (research.contentOpportunities.objecoes || [])[0];
+    if (obj && script.cutPhrases) script.cutPhrases = [obj, ...(script.cutPhrases || [])].slice(0, 3);
+    return script;
+  }
+
   // Novo card de correção vinculado
   function createCorrectionCard(c, reason) {
     const camp = S.sel.campaign(c.campaignId) || {};
@@ -708,8 +780,9 @@ window.CardView = (function () {
       case "new-strategy": { const camp = S.sel.campaign(c.campaignId) || {}; S.actions.updateCard(cardId, { strategy: AI.generateStrategyForCard(c, camp) }); U.toast("Nova estratégia gerada pela IA ✓"); refreshBody(); break; }
       case "strategy-to-script": { const camp = S.sel.campaign(c.campaignId) || {}; S.actions.updateCard(cardId, { script: AI.generateScriptForCard(c, camp) }); U.toast("Estratégia aplicada no roteiro ✓"); tab = "Roteiro"; render(); break; }
       case "gen-visual": { const camp = S.sel.campaign(c.campaignId) || {}; S.actions.updateCard(cardId, { visual: AI.generateVisualDirection(c, camp) }); U.toast("Visual do vídeo gerado pela IA ✓"); refreshBody(); break; }
-      case "gen-script": { const camp = S.sel.campaign(c.campaignId) || {}; S.actions.updateCard(cardId, { script: AI.generateScriptForCard(c, camp) }); U.toast("Roteiro completo gerado ✓"); refreshBody(); break; }
-      case "gen-hooks": { const camp = S.sel.campaign(c.campaignId) || {}; const ns = AI.generateScriptForCard(c, camp); S.actions.patchCard(cardId, "script.hook", ns.hook); S.actions.patchCard(cardId, "script.hookAlt1", ns.hookAlt1); S.actions.patchCard(cardId, "script.hookAlt2", ns.hookAlt2); U.toast("3 ganchos gerados ✓"); refreshBody(); break; }
+      case "gen-script": maybeResearch(c, (research) => { const camp = S.sel.campaign(c.campaignId) || {}; let ns = AI.generateScriptForCard(c, camp); if (research) ns = applyResearch(ns, research); S.actions.updateCard(cardId, { script: ns }); U.toast("Roteiro completo gerado ✓"); refreshBody(); }); break;
+      case "gen-hooks": maybeResearch(c, (research) => { const camp = S.sel.campaign(c.campaignId) || {}; let ns = AI.generateScriptForCard(c, camp); if (research) ns = applyResearch(ns, research); S.actions.patchCard(cardId, "script.hook", ns.hook); S.actions.patchCard(cardId, "script.hookAlt1", ns.hookAlt1); S.actions.patchCard(cardId, "script.hookAlt2", ns.hookAlt2); U.toast("3 ganchos gerados ✓"); refreshBody(); }); break;
+      case "research-roteiro": doResearch(c); break;
       case "gen-stories": { const camp = S.sel.campaign(c.campaignId) || {}; S.actions.patchCard(cardId, "script.stories", AI.generateStoriesForCard(c, camp).join("\n")); U.toast("Stories gerados ✓"); refreshBody(); break; }
       case "gen-audience-var": genAudienceVariation(c); break;
       case "versao-curta": U.simulated("Versão curta", "Versão de 10s criada como variação."); break;
