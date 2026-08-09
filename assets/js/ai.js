@@ -157,7 +157,7 @@ window.AI = (function () {
     const obj = "será que funciona mesmo?";
     const hooks = (HOOKS[angle] || HOOKS["Dor e Solução"]).map((h) => h.replace("{dor}", dor).replace("{obj}", obj).replace("{oferta}", oferta));
     const retention = { start: "00:14", end: "00:19", type: pick(["Resultado visual", "Transformação", "Reação", "Momento de virada"]), reason: "Cena de maior impacto — ótima para abrir o vídeo e prender atenção.", screenText: "Olha o que aconteceu no final…" };
-    return {
+    const script = {
       hook: hooks[0], hookAlt1: hooks[1] || "", hookAlt2: hooks[2] || "",
       opening: `Mostrar ${/pote|organiza|cozinha/i.test(product) ? "a bagunça (0–3s, sem falar)" : "o problema/contexto (0–3s)"}.`,
       mainLine: `${cap(product)} resolve ${dor}. Eu testei e o resultado foi ${pick(["surpreendente", "imediato", "melhor do que esperava"])}: ${(campaign && campaign.promise) || "resolve de vez"}.`,
@@ -169,6 +169,8 @@ window.AI = (function () {
       stories: `1) Enquete: "Você também sofre com ${dor}?" 2) Mostrar produto 3) Link "${cta}"`,
       retention,
     };
+    // Consulta a memória operacional (padrões aprovados/rejeitados) antes de entregar
+    return window.Learning ? window.Learning.applyToScript(script) : script;
   }
   function hashtagsFor(product, campaign) {
     const base = ["#viraliza", "#dicas"];

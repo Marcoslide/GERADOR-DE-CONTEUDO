@@ -17,6 +17,8 @@ window.Store = (function () {
   // migração leve: garante campos novos em estados salvos antigos
   function migrate() {
     if (!state.integrations) state.integrations = JSON.parse(JSON.stringify(window.SEED.integrations));
+    if (!state.learning) state.learning = { approvals: [], performance: [], preferences: { approvedHooks: [], rejectedHooks: [], approvedCTAs: [], rejectedReasons: [], preferredTone: "", winningFormats: [], losingFormats: [] } };
+    if (!state.ai) state.ai = { provider: "Modo Simulado", apiKey: "", model: "claude-sonnet-5", temperature: 0.7, maxTokens: 2000, status: "simulado" };
   }
 
   function reset() {
@@ -114,6 +116,9 @@ window.Store = (function () {
       card.content.creatives.unshift(Object.assign({ id: uid("cre"), status: "Gerado", creditsUsed: 0, createdAt: today() }, data));
     }),
     addFile: (cardId, data) => update((s) => { s.cards.find((c) => c.id === cardId).files.unshift(data); }),
+    addProductImage: (cardId, img) => update((s) => { const c = s.cards.find((x) => x.id === cardId); if (!c.content) c.content = { path: null, creatives: [] }; if (!c.content.media) c.content.media = { productImages: [] }; if (!c.content.media.productImages) c.content.media.productImages = []; const first = c.content.media.productImages.length === 0; c.content.media.productImages.push(Object.assign({ id: uid("img"), isPrimary: first, createdAt: today() }, img)); }),
+    removeProductImage: (cardId, imgId) => update((s) => { const c = s.cards.find((x) => x.id === cardId); c.content.media.productImages = (c.content.media.productImages || []).filter((i) => i.id !== imgId); if (c.content.media.productImages.length && !c.content.media.productImages.some((i) => i.isPrimary)) c.content.media.productImages[0].isPrimary = true; }),
+    setPrimaryImage: (cardId, imgId) => update((s) => { const c = s.cards.find((x) => x.id === cardId); (c.content.media.productImages || []).forEach((i) => i.isPrimary = i.id === imgId); }),
 
     addLibrary: (data) => update((s) => { s.library.unshift(Object.assign({ id: uid("lib"), tags: [], source: "", createdAt: today() }, data)); }),
     updateLibrary: (id, patch) => update((s) => { Object.assign(s.library.find((l) => l.id === id), patch); }),
@@ -152,5 +157,6 @@ window.Store = (function () {
   function emptyPub() { return { channel: "Instagram", date: "", time: "", captionFinal: "", hashtagsFinal: "", ctaFinal: "", link: "", status: "Não publicado", responsible: "Você", approved: false }; }
   function cloneChecklist() { return JSON.parse(JSON.stringify(window.SEED.cards[0].checklist)).map((g) => ({ group: g.group, items: g.items.map((i) => ({ t: i.t, done: false })) })); }
 
-  return { load, get, subscribe, emit, update, sel, actions, uid, reset, persist };
+  function importState(obj) { state = obj; migrate(); persist(); emit(); }
+  return { load, get, subscribe, emit, update, sel, actions, uid, reset, persist, importState };
 })();

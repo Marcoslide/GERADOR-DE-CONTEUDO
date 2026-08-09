@@ -361,6 +361,28 @@ window.App = (function () {
     });
   }
 
+  // ---------- Export / Import ----------
+  function exportData() {
+    try {
+      const data = JSON.stringify(S.get(), null, 2);
+      const blob = new Blob([data], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a"); a.href = url; a.download = "viraliza-backup.json"; document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      U.toast("Backup exportado ✓");
+    } catch (e) { U.toast("Falha ao exportar", "warn"); }
+  }
+  function importData() {
+    const inp = document.createElement("input"); inp.type = "file"; inp.accept = "application/json,.json";
+    inp.onchange = () => {
+      const f = inp.files && inp.files[0]; if (!f) return;
+      const r = new FileReader();
+      r.onload = () => { try { const obj = JSON.parse(r.result); if (!obj.cards || !obj.campaigns) throw new Error("inválido"); S.importState(obj); U.toast("Dados importados ✓"); location.hash = "#/hoje"; render(); } catch (e) { U.toast("Arquivo inválido", "warn"); } };
+      r.readAsText(f);
+    };
+    inp.click();
+  }
+
   // ---------- Máquina de Variações ----------
   function variationMenu(campaignId) {
     const camp = S.sel.campaign(campaignId);
@@ -466,7 +488,7 @@ window.App = (function () {
     U.renderChat();
   }
 
-  return { init, render, renderNav, openCard, openIdea, openCampaignForm, openCardForm, openIdeaForm, openPersonaForm, openLibForm, quickAction, generateCards, buyCredits, openCreateMenu, cardMenu, columnMenu, addColumn, libMenu, reuseLibrary, variationMenu };
+  return { init, render, renderNav, openCard, openIdea, openCampaignForm, openCardForm, openIdeaForm, openPersonaForm, openLibForm, quickAction, generateCards, buyCredits, openCreateMenu, cardMenu, columnMenu, addColumn, libMenu, reuseLibrary, variationMenu, exportData, importData };
 })();
 
 document.addEventListener("DOMContentLoaded", window.App.init);

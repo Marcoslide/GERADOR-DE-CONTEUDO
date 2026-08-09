@@ -544,7 +544,7 @@ window.Views = (function () {
   let setTab = "Conta";
   function config() {
     const st = S.get();
-    const tabs = ["Conta", "Equipe", "Créditos de IA", "Integrações", "Status personalizados", "Notificações"];
+    const tabs = ["Conta", "IA e APIs", "Aprendizados", "Equipe", "Créditos de IA", "Integrações", "Status personalizados", "Notificações"];
     const nav = tabs.map((t) => `<div class="set-nav-item ${t === setTab ? "active" : ""}" data-settab="${esc(t)}">${esc(t)}</div>`).join("");
     let panel = "";
     if (setTab === "Conta") panel = `
@@ -553,7 +553,13 @@ window.Views = (function () {
         <div class="field"><label>Email</label><input class="input" value="${esc(st.user.email)}" disabled/></div>
         <div class="field"><label>Papel</label><input class="input" value="${esc(st.user.role)}" disabled/></div>
       </div>
+      <div class="info-block"><h4>💾 Dados</h4>
+        <p class="muted" style="font-size:12px;margin-bottom:10px">Seus dados ficam salvos no navegador (localStorage). Exporte para backup ou importe em outro dispositivo.</p>
+        <div class="flex gap-8 wrap"><button class="btn btn-sm" data-act="export-json">⬇️ Exportar JSON</button><button class="btn btn-sm" data-act="import-json">⬆️ Importar JSON</button></div>
+      </div>
       <button class="btn btn-danger" data-act="reset-data">Restaurar dados de exemplo</button>`;
+    else if (setTab === "IA e APIs") panel = aiPanel();
+    else if (setTab === "Aprendizados") panel = learningPanel();
     else if (setTab === "Equipe") panel = `
       <div class="info-block"><h4>👥 Equipe & permissões</h4>
         <div class="status-row"><span class="avatar">MA</span><div style="flex:1"><b style="color:var(--text-0)">${esc(st.user.name)}</b><div class="muted" style="font-size:12px">${esc(st.user.email)}</div></div><span class="pill pill-accent">Owner</span></div>
@@ -617,6 +623,42 @@ window.Views = (function () {
       </div>`;
   }
 
+  function aiPanel() {
+    const ai = S.get().ai || {};
+    const stPill = { conectado: "pill-accent", simulado: "pill-amber", erro: "pill-red" }[ai.status] || "pill-gray";
+    return `
+      <div class="info-block"><h4>🤖 IA Principal</h4>
+        <div class="field"><label>Provedor</label><select class="select" data-ai="provider"><option ${ai.provider === "Modo Simulado" ? "selected" : ""}>Modo Simulado</option><option ${ai.provider === "Claude" ? "selected" : ""}>Claude</option></select></div>
+        <div class="field"><label>Modelo</label><select class="select" data-ai="model">${["claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5-20251001"].map((m) => `<option ${m === ai.model ? "selected" : ""}>${m}</option>`).join("")}</select></div>
+        <div class="form-row"><div class="field"><label>Temperatura</label><input class="input" type="number" step="0.1" min="0" max="1" data-ai="temperature" value="${ai.temperature}"/></div><div class="field"><label>Máx. tokens</label><input class="input" type="number" data-ai="maxTokens" value="${ai.maxTokens}"/></div></div>
+        <div class="field"><label>API Key (ou endpoint do backend)</label><input class="input" type="password" data-ai="apiKey" value="${esc(ai.apiKey || "")}" placeholder="Configure no backend — não exponha no frontend"/></div>
+        <div class="flex gap-8 center wrap"><span class="pill ${stPill}">${esc(ai.status)}</span><button class="btn btn-sm" data-act="ai-test">Testar conexão</button><button class="btn btn-primary btn-sm" data-act="ai-save">Salvar</button><button class="btn btn-sm" data-act="ai-simulated">Voltar ao simulado</button></div>
+      </div>
+      <div class="info-block mb-0"><h4>🔐 Arquitetura recomendada</h4>
+        <p class="muted" style="font-size:12px;line-height:1.6">Em produção, a API Key <b>não</b> deve ficar no frontend. O fluxo correto é:<br><code style="color:var(--accent-2)">Frontend Viraliza → Backend Viraliza → Claude API</code><br>O backend recebe <code>POST /api/ai/claude</code>, lê <code>ANTHROPIC_API_KEY</code> do ambiente, chama o Claude e retorna JSON estruturado. No MVP a geração roda em <b>modo simulado</b> com a memória operacional; a arquitetura (<code>AIProviderService</code>) já está pronta para plugar o backend.</p>
+      </div>`;
+  }
+
+  function learningPanel() {
+    const L = window.Learning.all();
+    const p = L.preferences || {};
+    const chip = (arr, cls) => (arr || []).slice(0, 6).map((x) => `<span class="pill ${cls}">${esc(String(x).slice(0, 40))}</span>`).join(" ") || '<span class="muted">—</span>';
+    const items = L.approvals.slice(0, 12).map((a) => `<div class="status-row"><span class="pill ${a.status === "approved" ? "pill-accent" : a.status === "rejected" ? "pill-red" : "pill-blue"}">${esc(a.status)}</span><div style="flex:1"><b style="color:var(--text-0)">${esc(a.type || "item")}</b><div class="muted" style="font-size:11px">${esc((a.finalContent || a.originalContent || a.insight || a.reason || "").slice(0, 70))}</div></div><span class="x-btn" data-lforget="${a.id}" title="Esquecer">🗑️</span></div>`).join("");
+    return `
+      <div class="info-block"><h4>🧠 Aprendizados da operação</h4>
+        <p class="muted" style="font-size:12px;margin-bottom:10px">O Viraliza aprende com o que você aprova, rejeita, edita e com o desempenho — e usa isso ao gerar novos conteúdos.</p>
+        <div class="kv">
+          <div class="k">Ganchos aprovados</div><div class="v">${chip(p.approvedHooks, "pill-accent")}</div>
+          <div class="k">CTAs aprovados</div><div class="v">${chip(p.approvedCTAs, "pill-accent")}</div>
+          <div class="k">Evitar (rejeitados)</div><div class="v">${chip(p.rejectedReasons, "pill-red")}</div>
+          <div class="k">Formatos vencedores</div><div class="v">${chip(p.winningFormats, "pill-accent")}</div>
+        </div>
+      </div>
+      <div class="info-block mb-0"><h4>📜 Histórico de aprendizado <span class="st-count">${L.approvals.length}</span></h4>
+        ${items || '<p class="muted" style="font-size:12px">Nada ainda. Aprove/rejeite roteiros e insira métricas para o sistema aprender.</p>'}
+      </div>`;
+  }
+
   function statusPanel() {
     const st = S.get();
     const rows = st.statuses.map((s) => `<div class="status-row"><span class="status-color" style="background:${s.color}"></span><div style="flex:1"><b style="color:var(--text-0)">${esc(s.name)}</b></div><div class="x-btn" data-delstatus="${esc(s.name)}">🗑️</div></div>`).join("");
@@ -643,6 +685,16 @@ window.Views = (function () {
     root.querySelectorAll("[data-delstatus]").forEach((el) => el.onclick = () => { S.actions.deleteStatus(el.dataset.delstatus); U.toast("Status removido"); });
     const addStatus = root.querySelector("[data-act='add-status']");
     if (addStatus) addStatus.onclick = () => { const n = root.querySelector("#new-status-name").value.trim(); const c = root.querySelector("#new-status-color").value; if (!n) return U.toast("Digite um nome", "warn"); S.actions.addStatus(n, c); U.toast("Status adicionado"); };
+    // IA e APIs
+    root.querySelectorAll("[data-ai]").forEach((el) => el.onchange = () => S.update((s) => { s.ai[el.dataset.ai] = el.type === "number" ? +el.value : el.value; }));
+    root.querySelectorAll("[data-act='ai-test']").forEach((el) => el.onclick = () => { const ai = S.get().ai; if (ai.provider === "Claude" && !ai.apiKey) return U.simulated("Testar conexão Claude", "Configure a API Key no backend. Rodando em modo simulado."); U.toast("Conexão testada (simulado) ✓"); });
+    root.querySelectorAll("[data-act='ai-save']").forEach((el) => el.onclick = () => { S.update((s) => { s.ai.status = s.ai.provider === "Claude" ? "conectado" : "simulado"; }); U.toast("Configuração de IA salva ✓"); window.App.render(); });
+    root.querySelectorAll("[data-act='ai-simulated']").forEach((el) => el.onclick = () => { S.update((s) => { s.ai.provider = "Modo Simulado"; s.ai.status = "simulado"; }); U.toast("Voltou ao modo simulado"); window.App.render(); });
+    // Aprendizados
+    root.querySelectorAll("[data-lforget]").forEach((el) => el.onclick = () => { window.Learning.forget(el.dataset.lforget); U.toast("Aprendizado esquecido"); window.App.render(); });
+    // Export / Import
+    root.querySelectorAll("[data-act='export-json']").forEach((el) => el.onclick = () => window.App.exportData());
+    root.querySelectorAll("[data-act='import-json']").forEach((el) => el.onclick = () => window.App.importData());
   }
 
   // ============================================================

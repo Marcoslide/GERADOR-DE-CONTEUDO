@@ -313,7 +313,15 @@ window.CardView = (function () {
     const camp = S.sel.campaign(c.campaignId);
     const research = camp && camp.research;
     return `
-      <div class="info-block" style="padding:12px 14px"><div class="flex gap-8 wrap">${gen.map(([a, l]) => `<button class="btn btn-sm" data-ca="${a}">${l}</button>`).join("")}</div></div>
+      <div class="info-block" style="padding:12px 14px"><div class="flex gap-8 wrap">${gen.map(([a, l]) => `<button class="btn btn-sm" data-ca="${a}">${l}</button>`).join("")}</div>
+        <div class="flex gap-8 wrap" style="margin-top:8px;border-top:1px solid var(--border);padding-top:8px">
+          <span class="muted" style="font-size:11px;align-self:center">Aprendizado:</span>
+          <button class="btn btn-xs" data-ca="approve_script">👍 Aprovar</button>
+          <button class="btn btn-xs" data-ca="reject_script">👎 Rejeitar</button>
+          <button class="btn btn-xs" data-ca="save_pattern_script">⭐ Salvar como padrão</button>
+          ${s._memoryUsed ? `<span class="pill pill-accent" style="font-size:10px">🧠 gerado com sua memória</span>` : ""}
+        </div>
+      </div>
       ${research ? `<div class="info-block" style="padding:12px 14px"><h4 style="margin-bottom:8px">🔎 Base usada (inteligência de mercado)</h4><div class="flex gap-8 wrap">${(research.contentOpportunities.duvidas.slice(0, 1)).map((t) => `<span class="pill pill-blue">Dúvida: ${esc(t)}</span>`).join("")}${(research.contentOpportunities.objecoes.slice(0, 1)).map((t) => `<span class="pill pill-amber">Objeção: ${esc(t)}</span>`).join("")}${(research.contentOpportunities.elogios.slice(0, 1)).map((t) => `<span class="pill pill-accent">Prova: ${esc(t)}</span>`).join("")}<span class="pill pill-gray">Público: ${esc(c.strategy && c.strategy.audience || camp.audience || "")}</span></div></div>` : ""}
       ${s.retention ? `<div class="alert good" style="margin-bottom:14px"><span class="al-ico">🎯</span><div class="al-body" style="font-size:12px"><b>Cena de retenção:</b> ${esc(s.retention.start)}–${esc(s.retention.end)} · ${esc(s.retention.type)} — “${esc(s.retention.screenText)}”</div></div>` : ""}
       ${hasScript ? "" : `<div class="empty" style="padding:20px"><div class="e-ico">📝</div><h3>Sem roteiro ainda</h3><p>Clique em <b>Gerar roteiro completo</b> — a IA cria gancho, cena de retenção, fala, texto na tela, CTA, legenda e hashtags.</p></div>`}
@@ -393,10 +401,18 @@ window.CardView = (function () {
 
   function contentGenerate(c, creatives) {
     const cr = S.get().credits;
+    const imgs = (c.content.media && c.content.media.productImages) || [];
+    const gallery = imgs.map((im) => `
+      <div style="position:relative;width:88px;height:88px;border-radius:10px;overflow:hidden;border:2px solid ${im.isPrimary ? "var(--accent)" : "var(--border-2)"}">
+        <img src="${im.url}" style="width:100%;height:100%;object-fit:cover"/>
+        ${im.isPrimary ? `<span class="pill pill-accent" style="position:absolute;top:4px;left:4px;font-size:9px">principal</span>` : `<button class="btn btn-xs" data-imgprimary="${im.id}" style="position:absolute;bottom:4px;left:4px;padding:2px 6px;font-size:9px">Principal</button>`}
+        <span class="x-btn" data-imgdel="${im.id}" style="position:absolute;top:2px;right:2px;width:20px;height:20px;font-size:11px;background:rgba(0,0,0,.6)">✕</span>
+      </div>`).join("");
     return `
       <button class="btn btn-ghost btn-sm" data-path="" style="margin-bottom:12px">← Caminhos</button>
       <div class="info-block"><h4>✨ Gerar vídeo com IA</h4>
-        <div class="upload-zone" data-sim="Upload da imagem do produto" style="margin-bottom:16px"><div class="uz-ico">🖼️</div><b style="color:var(--text-0)">Upload da imagem do produto</b><div class="muted" style="font-size:12px;margin-top:4px">A IA valida a imagem automaticamente. Formatos: JPG, PNG.</div></div>
+        <div class="upload-zone" data-ca="upload-photo" style="margin-bottom:12px"><div class="uz-ico">🖼️</div><b style="color:var(--text-0)">${imgs.length ? "Adicionar outra foto do produto" : "Upload da imagem do produto"}</b><div class="muted" style="font-size:12px;margin-top:4px">JPG, PNG ou WEBP. As fotos ficam salvas no card.</div></div>
+        ${imgs.length ? `<div class="flex gap-8 wrap" style="margin-bottom:14px">${gallery}</div>` : ""}
         <div class="form-row">
           <div class="field"><label>Tipo de vídeo</label><select class="select" id="gen-type">${VIDEO_TYPES.map((t) => `<option>${esc(t)}</option>`).join("")}</select></div>
           <div class="field"><label>Template</label><select class="select" id="gen-tpl">${TEMPLATES.map((t) => `<option>${esc(t)}</option>`).join("")}</select></div>
@@ -585,10 +601,18 @@ window.CardView = (function () {
     root.querySelectorAll("[data-f]").forEach((el) => el.onchange = () => { S.actions.updateCard(cardId, { [el.dataset.f]: el.value }); if (el.dataset.f === "status") window.App.render(); });
     root.querySelectorAll("[data-s]").forEach((el) => el.onchange = () => S.actions.patchCard(cardId, "strategy." + el.dataset.s, el.value));
     root.querySelectorAll("[data-p]").forEach((el) => el.onchange = () => { const v = el.type === "checkbox" ? el.checked : el.value; S.actions.patchCard(cardId, "publication." + el.dataset.p, v); });
-    root.querySelectorAll("[data-sc]").forEach((el) => el.onblur = () => {
-      const key = el.dataset.sc, val = el.innerText.trim();
-      if (["scenes", "screenText", "cutPhrases"].includes(key)) S.actions.patchCard(cardId, "script." + key, val.split(/[•|]/).map((x) => x.trim()).filter(Boolean));
-      else S.actions.patchCard(cardId, "script." + key, val);
+    root.querySelectorAll("[data-sc]").forEach((el) => {
+      el.dataset.orig = el.innerText.trim();
+      el.onblur = () => {
+        const key = el.dataset.sc, val = el.innerText.trim(), old = el.dataset.orig;
+        if (["scenes", "screenText", "cutPhrases"].includes(key)) S.actions.patchCard(cardId, "script." + key, val.split(/[•|]/).map((x) => x.trim()).filter(Boolean));
+        else S.actions.patchCard(cardId, "script." + key, val);
+        // aprendizado por edição (gancho, fala principal, CTA)
+        if (old && val && old !== val && ["hook", "mainLine", "cta"].includes(key) && window.Learning) {
+          const ins = window.Learning.saveEdit(old, val, key === "mainLine" ? "mainLine" : key, { cardId, campaignId: card.campaignId });
+          U.toast("Aprendi com sua edição: " + ins);
+        }
+      };
     });
     root.querySelectorAll("[data-m]").forEach((el) => el.onchange = () => S.actions.patchCard(cardId, "analysis.metrics." + el.dataset.m, el.value));
 
@@ -597,6 +621,9 @@ window.CardView = (function () {
 
     // Visual do vídeo
     root.querySelectorAll("[data-v]").forEach((el) => el.onchange = () => S.actions.patchCard(cardId, "visual." + el.dataset.v, el.value));
+    // Fotos do produto
+    root.querySelectorAll("[data-imgprimary]").forEach((el) => el.onclick = () => { S.actions.setPrimaryImage(cardId, el.dataset.imgprimary); refreshBody(); });
+    root.querySelectorAll("[data-imgdel]").forEach((el) => el.onclick = () => { S.actions.removeProductImage(cardId, el.dataset.imgdel); U.toast("Foto removida"); refreshBody(); });
     // Cards de correção vinculados
     root.querySelectorAll("[data-openlinked]").forEach((el) => el.onclick = () => window.App.openCard(el.dataset.openlinked));
 
@@ -837,6 +864,20 @@ window.CardView = (function () {
       case "gen-script": maybeResearch(c, (research) => { const camp = S.sel.campaign(c.campaignId) || {}; let ns = AI.generateScriptForCard(c, camp); if (research) ns = applyResearch(ns, research); S.actions.updateCard(cardId, { script: ns }); U.toast("Roteiro completo gerado ✓"); refreshBody(); }); break;
       case "gen-hooks": maybeResearch(c, (research) => { const camp = S.sel.campaign(c.campaignId) || {}; let ns = AI.generateScriptForCard(c, camp); if (research) ns = applyResearch(ns, research); S.actions.patchCard(cardId, "script.hook", ns.hook); S.actions.patchCard(cardId, "script.hookAlt1", ns.hookAlt1); S.actions.patchCard(cardId, "script.hookAlt2", ns.hookAlt2); U.toast("3 ganchos gerados ✓"); refreshBody(); }); break;
       case "research-roteiro": doResearch(c); break;
+      case "approve_script": {
+        window.Learning.saveApproval({ type: "script", finalContent: c.script.hook, tone: (S.sel.campaign(c.campaignId) || {}).style, cardId, campaignId: c.campaignId });
+        window.Learning.saveApproval({ type: "hook", finalContent: c.script.hook, cardId });
+        if (c.script.cta) window.Learning.saveApproval({ type: "cta", finalContent: c.script.cta, cardId });
+        S.actions.addLibrary({ type: "Roteiro vencedor", title: c.script.title || c.title, content: c.script.hook || "", source: cardId, tags: ["aprovado"] });
+        U.toast("Roteiro aprovado ✓ — salvei como padrão da sua operação"); break;
+      }
+      case "save_pattern_script": window.Learning.saveApproval({ type: "hook", finalContent: c.script.hook, cardId }); U.toast("Gancho salvo como padrão aprovado ✓"); break;
+      case "reject_script": {
+        const reasons = ["Genérico demais", "Formal demais", "Longo demais", "Fraco para venda", "Não combina com meu público", "Roteiro desconexo", "CTA fraco"];
+        U.modal({ title: "Rejeitar roteiro", size: "narrow", body: `<p class="muted" style="margin-bottom:10px">Por quê? Vou evitar esse estilo nas próximas gerações.</p><div class="set-nav">${reasons.map((r) => `<div class="set-nav-item" data-rej="${esc(r)}">${r}</div>`).join("")}</div>`,
+          onMount: (o) => o.querySelectorAll("[data-rej]").forEach((el) => el.onclick = () => { window.Learning.saveRejection({ type: "hook", originalContent: c.script.hook, reason: el.dataset.rej, cardId, campaignId: c.campaignId }); U.closeModal(); U.toast("Anotado: evitar “" + el.dataset.rej + "” ✓"); }) });
+        break;
+      }
       case "gen-stories": { const camp = S.sel.campaign(c.campaignId) || {}; S.actions.patchCard(cardId, "script.stories", AI.generateStoriesForCard(c, camp).join("\n")); U.toast("Stories gerados ✓"); refreshBody(); break; }
       case "gen-audience-var": genAudienceVariation(c); break;
       case "versao-curta": U.simulated("Versão curta", "Versão de 10s criada como variação."); break;
@@ -852,16 +893,25 @@ window.CardView = (function () {
         S.actions.setCardStatus(cardId, "Enviado para análise");
         S.actions.addCreative(cardId, { type: "Vídeo enviado", source: "Upload", status: "Analisado", fileName: "video-enviado.mp4", creditsUsed: 0 });
         U.toast("Vídeo analisado pela IA ✓"); render(); break;
-      case "gen-ai-confirm":
+      case "upload-photo": {
+        const inp = document.createElement("input"); inp.type = "file"; inp.accept = "image/jpeg,image/png,image/webp,image/*";
+        inp.onchange = () => { const f = inp.files && inp.files[0]; if (!f) return; const r = new FileReader(); r.onload = () => { S.actions.addProductImage(cardId, { name: f.name, url: r.result, type: "image" }); U.toast("Foto do produto salva no card ✓"); refreshBody(); }; r.readAsDataURL(f); };
+        inp.click(); break;
+      }
+      case "gen-ai-confirm": {
+        const imgs = (c.content.media && c.content.media.productImages) || [];
+        if (!imgs.length) return U.toast("Envie a foto do produto primeiro", "warn");
         if (cr.available < 12) return U.toast("Créditos insuficientes — compre mais", "warn");
+        const primary = imgs.find((i) => i.isPrimary) || imgs[0];
         U.confirm("Essa geração consumirá 12 créditos. Deseja continuar?", () => {
           S.actions.spendCredits(12, "Vídeo IA — " + c.title);
           const tpl = (document.querySelector("#gen-tpl") || {}).value;
-          const creative = AI.generateVideoCreativeMock(c, { template: tpl, cost: 12 });
+          const creative = Object.assign(AI.generateVideoCreativeMock(c, { template: tpl, cost: 12 }), { sourceImageId: primary.id, previewUrl: primary.url });
           S.actions.addCreative(cardId, creative);
           S.actions.setCardStatus(cardId, "Em edição");
           U.toast("Vídeo IA gerado (simulado) ✓ — 12 créditos"); refreshBody();
         }, { yes: "Gerar (12 créditos)" }); break;
+      }
       case "upload-video":
         S.actions.addCreative(cardId, { type: "Vídeo enviado", source: "Upload", status: "Enviado", fileName: "meu-video.mp4", creditsUsed: 0 });
         S.actions.addFile(cardId, { name: "meu-video.mp4", type: "Vídeo bruto", size: "12 MB", ico: "🎬" });

@@ -136,7 +136,11 @@ assets/
     seed.js             Dados mockados realistas
     store.js            Estado + persistência (localStorage)
     ai.js               Camada de IA (simulada): campanha, roteiro, visual, correção, público
+    learning.js         Memória operacional (aprovações/rejeições/edições/performance)
     research.js         Inteligência de Mercado / Pesquisa IA (services + análise estruturada)
+    publish.js          Máquina de Publicação (plano, fila, modos, integrações, histórico)
+    variations.js       Máquina de Variações (ângulos distintos, explodir vencedor)
+    assistant.js        Assistente operacional (contexto + ações reais)
     components.js       Modal, toast, chat contextual, helpers
     views.js            As 8 telas
     campaign.js         Criar campanha com IA (conversacional)

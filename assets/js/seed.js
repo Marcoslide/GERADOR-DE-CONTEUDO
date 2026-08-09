@@ -240,6 +240,9 @@ window.SEED = (function () {
     youtube: { status: "em breve" },
   };
 
-  return { persona, ideas, campaigns, cards, library, today, credits, statuses, integrations,
+  const learning = { approvals: [], performance: [], preferences: { approvedHooks: [], rejectedHooks: [], approvedCTAs: [], rejectedReasons: [], preferredTone: "", winningFormats: [], losingFormats: [] } };
+  const ai = { provider: "Modo Simulado", apiKey: "", model: "claude-sonnet-5", temperature: 0.7, maxTokens: 2000, status: "simulado" };
+
+  return { persona, ideas, campaigns, cards, library, today, credits, statuses, integrations, learning, ai,
     user: { id: "user_1", name: "Marcos", email: "marcospereirajpjp@gmail.com", role: "Owner" } };
 })();
