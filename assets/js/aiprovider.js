@@ -22,6 +22,8 @@ window.AIProvider = (function () {
 
   function learningContext() {
     if (!window.Learning) return {};
+    // operationLearningContext completo (aprovados/rejeitados/tons/formatos/publicação…)
+    if (window.Learning.buildOperationContext) return window.Learning.buildOperationContext();
     const m = window.Learning.getRelevantMemory("generate", {});
     return {
       approvedStyle: m.approvedStyle, rejectedStyle: m.rejectedStyle, preferredTone: m.preferredTone,
@@ -66,10 +68,17 @@ window.AIProvider = (function () {
       return { reply: m.text, actions: (m.actions || []).map((a) => ({ type: "assistant_op", payload: { act: a.act, label: a.label, payload: a.payload } })), learningUsed: [] };
     });
   }
-  async function generateScript(card, ctx) { return withClaude("generate_script", ctx, { cardId: card && card.id }, () => ({ data: { script: window.AI.generateScriptForCard(card, ctx && ctx.campaign || {}) }, reply: "Roteiro gerado (simulado).", actions: [], learningUsed: [] })); }
+  const camp = (ctx) => (ctx && ctx.campaign) || {};
+  async function generateScript(card, ctx) { return withClaude("generate_script", ctx, { cardId: card && card.id }, () => ({ data: { script: window.AI.generateScriptForCard(card, camp(ctx)) }, reply: "Roteiro gerado (simulado).", actions: [], learningUsed: [] })); }
   async function generateVariations(input, ctx) { return withClaude("generate_variations", ctx, input, () => ({ reply: "Variações geradas (simulado).", actions: [], learningUsed: [] })); }
   async function generateCampaign(input, ctx) { return withClaude("generate_campaign", ctx, input, () => ({ data: { plan: window.AI.generateCampaignPlan(input) }, reply: "Campanha planejada (simulado).", actions: [], learningUsed: [] })); }
+  async function generateCards(campaign, ctx) { return withClaude("generate_campaign", Object.assign({ campaign }, ctx), { campaignId: campaign && campaign.id, mode: "cards" }, () => ({ reply: "Cards gerados (simulado).", actions: [{ type: "create_cards", payload: { cards: [] } }], learningUsed: [] })); }
+  async function generateMainSpeech(card, ctx) { return withClaude("generate_script", ctx, { cardId: card && card.id, field: "mainSpeech" }, () => { const sc = window.AI.generateScriptForCard(card, camp(ctx)); return { data: { mainSpeech: sc.mainLine }, reply: "Fala principal gerada (simulado).", actions: [], learningUsed: [] }; }); }
+  async function generateCaption(card, ctx) { return withClaude("generate_script", ctx, { cardId: card && card.id, field: "caption" }, () => { const sc = window.AI.generateScriptForCard(card, camp(ctx)); return { data: { caption: sc.caption, hashtags: sc.hashtags }, reply: "Legenda gerada (simulado).", actions: [], learningUsed: [] }; }); }
+  async function generateChecklist(card, ctx) { return withClaude("generate_script", ctx, { cardId: card && card.id, field: "checklist" }, () => ({ data: { checklist: window.AI.generateChecklistForCard(card, camp(ctx)) }, reply: "Checklist gerado (simulado).", actions: [], learningUsed: [] })); }
+  async function generateVisualDirection(card, ctx) { return withClaude("generate_script", ctx, { cardId: card && card.id, field: "visual" }, () => ({ data: { visual: window.AI.generateVisualDirection(card, camp(ctx)) }, reply: "Visual gerado (simulado).", actions: [], learningUsed: [] })); }
   async function analyzeContent(card, ctx) { return withClaude("analyze_content", ctx, { cardId: card && card.id }, () => ({ data: { analysis: window.AI.analyzeUploadedVideoMock({ duration: 22 }, card) }, reply: "Análise (simulada).", actions: [], learningUsed: [] })); }
+  async function generateCorrection(card, analysis, ctx) { return withClaude("generate_correction", ctx, { cardId: card && card.id, analysis }, () => ({ data: { correction: window.AI.generateCorrectionFromAnalysis(card, analysis) }, reply: "Correção gerada (simulado).", actions: [], learningUsed: [] })); }
   async function createPublicationPlan(campaign, ctx) { return withClaude("create_publication_plan", ctx, { campaignId: campaign && campaign.id }, () => { window.PublishEngine.buildPlan(campaign); return { reply: "Plano montado (simulado).", actions: [], learningUsed: [] }; }); }
 
   // Executa actions[] que o Claude retornar (Frontend executa ação real)
@@ -85,6 +94,8 @@ window.AIProvider = (function () {
         else if (a.type === "generate_script" && ctx.card) { if (p.script) S.actions.updateCard(ctx.card.id, { script: p.script }); done++; }
         else if (a.type === "create_publication_plan" && ctx.campaign) { window.PublishEngine.buildPlan(ctx.campaign); done++; }
         else if (a.type === "move_status" && ctx.card && p.status) { S.actions.setCardStatus(ctx.card.id, p.status); done++; }
+        else if (a.type === "generate_correction" && ctx.card) { const anl = (ctx.card.analysis) || {}; const corr = p.correction || window.AI.generateCorrectionFromAnalysis(ctx.card, anl); if (window.CardView && window.CardView.applyCorrection) window.CardView.applyCorrection(ctx.card.id, corr); else if (p.correctedScript) S.actions.updateCard(ctx.card.id, { script: Object.assign({}, ctx.card.script, p.correctedScript) }); done++; }
+        else if (a.type === "save_learning") { if (window.LearningMemoryService) { if (p.kind === "rejection") window.LearningMemoryService.recordRejection(p); else if (p.kind === "edit") window.LearningMemoryService.recordEdit(p.before, p.after, p.field, p); else if (p.kind === "publication") window.LearningMemoryService.recordPublication(p); else window.LearningMemoryService.recordApproval(p); } done++; }
         else if (a.type === "save_to_library") { S.actions.addLibrary({ type: p.libType || "Aprendizado", title: p.title || "Item", content: p.content || "" }); done++; }
       } catch (e) { /* ignora action inválida */ }
     });
@@ -92,5 +103,13 @@ window.AIProvider = (function () {
   }
 
   function lastErr() { return lastError; }
-  return { isReal, base, status, testConnection, call, withClaude, assistantReply, generateScript, generateVariations, generateCampaign, analyzeContent, createPublicationPlan, executeActions, learningContext, lastErr };
+  return {
+    isReal, base, status, testConnection, call, withClaude, executeActions, learningContext, lastErr,
+    assistantReply, generateScript, generateVariations, generateCampaign, generateCards,
+    generateMainSpeech, generateCaption, generateChecklist, generateVisualDirection,
+    analyzeContent, generateCorrection, createPublicationPlan,
+  };
 })();
+
+/* Nome canônico pedido no roadmap. Todas as funções de IA passam por aqui. */
+window.AIProviderService = window.AIProvider;

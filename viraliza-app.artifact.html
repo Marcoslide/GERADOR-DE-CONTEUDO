@@ -939,7 +939,9 @@ window.Store = (function () {
   // migração leve: garante campos novos em estados salvos antigos
   function migrate() {
     if (!state.integrations) state.integrations = JSON.parse(JSON.stringify(window.SEED.integrations));
-    if (!state.learning) state.learning = { approvals: [], performance: [], preferences: { approvedHooks: [], rejectedHooks: [], approvedCTAs: [], rejectedReasons: [], preferredTone: "", winningFormats: [], losingFormats: [] } };
+    if (!state.learning) state.learning = { approvals: [], performance: [], edits: [], publicationLearnings: [], preferences: { approvedHooks: [], rejectedHooks: [], approvedCTAs: [], rejectedReasons: [], preferredTone: "", winningFormats: [], losingFormats: [] } };
+    if (!state.learning.edits) state.learning.edits = [];
+    if (!state.learning.publicationLearnings) state.learning.publicationLearnings = [];
     if (!state.ai) state.ai = { provider: "Modo Simulado", apiKey: "", model: "claude-sonnet-5", temperature: 0.7, maxTokens: 2000, status: "simulado" };
   }
 
@@ -1094,7 +1096,7 @@ window.Learning = (function () {
   const S = window.Store;
   const uid = (p) => p + "_" + Math.random().toString(36).slice(2, 9);
   const today = () => new Date().toISOString().slice(0, 10);
-  function mem() { const s = S.get(); if (!s.learning) s.learning = { approvals: [], performance: [], preferences: { approvedHooks: [], rejectedHooks: [], approvedCTAs: [], rejectedReasons: [], preferredTone: "", winningFormats: [], losingFormats: [] } }; return s.learning; }
+  function mem() { const s = S.get(); if (!s.learning) s.learning = { approvals: [], performance: [], edits: [], publicationLearnings: [], preferences: { approvedHooks: [], rejectedHooks: [], approvedCTAs: [], rejectedReasons: [], preferredTone: "", winningFormats: [], losingFormats: [] } }; if (!s.learning.edits) s.learning.edits = []; if (!s.learning.publicationLearnings) s.learning.publicationLearnings = []; return s.learning; }
 
   function saveApproval(item) {
     S.update((s) => {
@@ -1117,10 +1119,19 @@ window.Learning = (function () {
     const insight = insightFromEdit(field, before, after);
     S.update((s) => {
       const m = s.learning;
-      m.approvals.unshift({ id: uid("edit"), status: "edited", type: field, originalContent: before, finalContent: after, insight, cardId: ctx.cardId, campaignId: ctx.campaignId, createdAt: today(), active: true });
+      const entry = { id: uid("edit"), type: "edit_learning", status: "edited", field, before, after, originalContent: before, finalContent: after, insight, applyToFuture: true, cardId: ctx.cardId, campaignId: ctx.campaignId, createdAt: today(), active: true };
+      m.approvals.unshift(entry);
+      if (!m.edits) m.edits = []; m.edits.unshift(entry);
       if (field === "hook" && after) m.preferences.approvedHooks.unshift(after);
     });
     return insight;
+  }
+  // Aprende com a publicação (o que performou, bom horário/canal, correção aplicada)
+  function savePublicationLearning(item) {
+    S.update((s) => {
+      const m = s.learning; if (!m.publicationLearnings) m.publicationLearnings = [];
+      m.publicationLearnings.unshift(Object.assign({ id: uid("pub"), createdAt: today(), active: true }, item));
+    });
   }
   function savePerformanceInsight(item) {
     S.update((s) => {
@@ -1142,8 +1153,23 @@ window.Learning = (function () {
   function getApprovedPatterns() { const p = mem().preferences; return { hooks: (p.approvedHooks || []).filter(Boolean).slice(0, 5), ctas: (p.approvedCTAs || []).slice(0, 5), tone: p.preferredTone, formats: p.winningFormats || [] }; }
   function getRejectedPatterns() { const p = mem().preferences; return { hooks: (p.rejectedHooks || []).slice(0, 5), reasons: (p.rejectedReasons || []).slice(0, 5), formats: p.losingFormats || [] }; }
   function getWinningPatterns() { return mem().performance.filter((x) => x.type === "winner" && x.active); }
+  function getPublicationLearnings() { return (mem().publicationLearnings || []).filter((x) => x.active).slice(0, 8); }
   function getRelevantMemory(task, ctx) {
-    return { task, approvedStyle: getApprovedPatterns(), rejectedStyle: getRejectedPatterns(), performanceInsights: getWinningPatterns(), preferredTone: mem().preferences.preferredTone };
+    return { task, approvedStyle: getApprovedPatterns(), rejectedStyle: getRejectedPatterns(), performanceInsights: getWinningPatterns(), preferredTone: mem().preferences.preferredTone, publicationLearnings: getPublicationLearnings() };
+  }
+  // Contexto operacional completo para enviar ao Claude (operationLearningContext)
+  function buildOperationContext() {
+    const ap = getApprovedPatterns(), rj = getRejectedPatterns(), m = mem();
+    return {
+      approvedStyle: ap.hooks, rejectedStyle: rj.hooks, preferredTone: m.preferences.preferredTone,
+      preferredHooks: ap.hooks, rejectedHooks: rj.hooks,
+      winningFormats: m.preferences.winningFormats || [], losingFormats: m.preferences.losingFormats || [],
+      approvedScripts: m.approvals.filter((x) => x.type === "script" && x.status === "approved").map((x) => x.finalContent).slice(0, 5),
+      rejectedScripts: m.approvals.filter((x) => x.type === "script" && x.status === "rejected").map((x) => x.originalContent).slice(0, 5),
+      correctionHistory: (m.performance || []).filter((x) => x.type === "correction").slice(0, 5),
+      productPatterns: [], audiencePatterns: [],
+      performanceInsights: getWinningPatterns(), publicationLearnings: getPublicationLearnings(),
+    };
   }
 
   // Aplica a memória num roteiro recém-gerado (reusa gancho aprovado, evita rejeitado)
@@ -1158,9 +1184,29 @@ window.Learning = (function () {
   // Controle do usuário
   function forget(id) { S.update((s) => { s.learning.approvals = s.learning.approvals.filter((x) => x.id !== id); s.learning.performance = s.learning.performance.filter((x) => x.id !== id); }); }
   function toggle(id) { S.update((s) => { const all = s.learning.approvals.concat(s.learning.performance); const it = all.find((x) => x.id === id); if (it) it.active = !it.active; }); }
-  function all() { const m = mem(); return { approvals: m.approvals, performance: m.performance, preferences: m.preferences }; }
+  function all() { const m = mem(); return { approvals: m.approvals, performance: m.performance, edits: m.edits || [], publicationLearnings: m.publicationLearnings || [], preferences: m.preferences }; }
 
-  return { mem, saveApproval, saveRejection, saveEdit, savePerformanceInsight, getApprovedPatterns, getRejectedPatterns, getWinningPatterns, getRelevantMemory, applyToScript, forget, toggle, all };
+  const api = { mem, saveApproval, saveRejection, saveEdit, savePerformanceInsight, savePublicationLearning, getApprovedPatterns, getRejectedPatterns, getWinningPatterns, getPublicationLearnings, getRelevantMemory, buildOperationContext, applyToScript, forget, toggle, all };
+  return api;
+})();
+
+/* Alias explícito pedido no roadmap: LearningMemoryService.
+   Aprende com: aprovação, rejeição, edição, análise, performance,
+   publicação, correção, vencedor e biblioteca. */
+window.LearningMemoryService = (function () {
+  const L = window.Learning;
+  return {
+    recordApproval: (item) => L.saveApproval(item),
+    recordRejection: (item) => L.saveRejection(item),
+    recordEdit: (before, after, field, ctx) => L.saveEdit(before, after, field, ctx),
+    recordPerformance: (item) => L.savePerformanceInsight(item),
+    recordPublication: (item) => L.savePublicationLearning(item),
+    recordWinner: (item) => L.savePerformanceInsight(Object.assign({ type: "winner" }, item)),
+    buildContext: () => L.buildOperationContext(),
+    getMemory: () => L.all(),
+    forget: (id) => L.forget(id),
+    toggle: (id) => L.toggle(id),
+  };
 })();
 
 </script>
@@ -2079,6 +2125,10 @@ window.PublishEngine = (function () {
     };
     S.update((s) => { const cc = s.cards.find((x) => x.id === cardId); cc.analysis = { metrics, done: true, summary }; cc.publication.pubStatus = "Em análise"; });
     S.actions.setCardStatus(cardId, "Analisando resultado");
+    // A memória aprende com a publicação (bom horário/canal, o que funcionou/falhou)
+    if (window.Learning && window.Learning.savePublicationLearning) {
+      window.Learning.savePublicationLearning({ cardId, campaignId: c.campaignId, channel: c.publication && c.publication.channel, time: c.publication && c.publication.time, views: metrics.views, retention: metrics.retention, worked: summary.worked, failed: summary.failed, goodTime: summary.goodTime });
+    }
     U.toast("Métricas coletadas (simuladas) ✓ — análise gerada");
   }
 
@@ -5073,7 +5123,17 @@ window.CardView = (function () {
   function selStatus(val) { return `<select class="select" data-f="status">${S.get().statuses.map((s) => `<option ${s.name === val ? "selected" : ""}>${esc(s.name)}</option>`).join("")}</select>`; }
   function selPrio(val) { return `<select class="select" data-f="priority">${["Alta", "Média", "Baixa"].map((o) => `<option ${o === val ? "selected" : ""}>${esc(o)}</option>`).join("")}</select>`; }
 
-  return { open, current: () => (document.getElementById("modal-overlay") && document.querySelector(".drawer-tabs") ? cardId : null), refresh: () => { const el = document.getElementById("card-tab-body"); if (el) refreshBody(); } };
+  // Aplica uma correção (vinda do Claude ou do mock) como nova versão do roteiro
+  function applyCorrection(id, cor) {
+    if (!cor) return; const cs = cor.correctedScript || cor;
+    if (cs.hook) S.actions.patchCard(id, "script.hook", cs.hook);
+    if (cs.opening) S.actions.patchCard(id, "script.opening", cs.opening);
+    if (cs.cta) S.actions.patchCard(id, "script.cta", cs.cta);
+    if (cs.screenText) S.actions.patchCard(id, "script.screenText", Array.isArray(cs.screenText) ? cs.screenText : [cs.screenText]);
+    S.actions.addCorrection(id, { reason: cor.reason || "Correção", note: cor.diagnosis || "Correção aplicada (nova versão do roteiro).", status: "Aplicada" });
+    const el = document.getElementById("card-tab-body"); if (el && (window.CardView.current && window.CardView.current() === id)) refreshBody();
+  }
+  return { open, applyCorrection, current: () => (document.getElementById("modal-overlay") && document.querySelector(".drawer-tabs") ? cardId : null), refresh: () => { const el = document.getElementById("card-tab-body"); if (el) refreshBody(); } };
 })();
 
 </script>
@@ -5398,7 +5458,28 @@ window.Assistant = (function () {
   function bestCard(cards) { const done = cards.filter((c) => c.analysis && c.analysis.done && c.analysis.metrics && c.analysis.metrics.views); if (!done.length) return null; return done.sort((a, b) => metricScore(b) - metricScore(a))[0]; }
   function learnPattern(cards) { const types = {}; cards.forEach((c) => types[c.type] = (types[c.type] || 0) + 1); const top = Object.keys(types).sort((a, b) => types[b] - types[a])[0]; return `📚 Padrão: vídeos de <b>${esc(top || "Antes e depois")}</b> vêm performando melhor. Recomendo criar mais variações desse tipo.`; }
 
-  return { getContext, header, greeting, quickButtons, reply, exec, label };
+  // Contexto operacional completo para a IA (roadmap: getAssistantContext)
+  function getAssistantContext() {
+    const ctx = getContext(), st = ctx.st, c = ctx.card, camp = ctx.campaign;
+    const cards = camp ? S.sel.cardsByCampaign(camp.id) : [];
+    return {
+      view: ctx.view,
+      campaign: camp || null,
+      card: c || null,
+      script: (c && c.script) || null,
+      videos: (c && c.video && c.video.versions) || [],
+      analysis: (c && c.analysis) || null,
+      corrections: (c && c.corrections) || [],
+      library: st.library || [],
+      learnings: window.Learning ? window.Learning.buildOperationContext() : {},
+      publicationPlan: camp ? cards.filter((x) => x.publication && x.publication.date).map((x) => ({ card: x.title, date: x.publication.date, time: x.publication.time, channel: x.publication.channel, status: window.PublishEngine.pubStatus(x) })) : [],
+      publicationQueue: camp && window.PublishEngine ? window.PublishEngine.queue(camp.id).map((x) => ({ card: x.title, date: x.publication.date, time: x.publication.time, channel: x.publication.channel })) : [],
+    };
+  }
+
+  const api = { getContext, getAssistantContext, header, greeting, quickButtons, reply, exec, label };
+  window.getAssistantContext = getAssistantContext;
+  return api;
 })();
 
 </script>
@@ -5427,6 +5508,8 @@ window.AIProvider = (function () {
 
   function learningContext() {
     if (!window.Learning) return {};
+    // operationLearningContext completo (aprovados/rejeitados/tons/formatos/publicação…)
+    if (window.Learning.buildOperationContext) return window.Learning.buildOperationContext();
     const m = window.Learning.getRelevantMemory("generate", {});
     return {
       approvedStyle: m.approvedStyle, rejectedStyle: m.rejectedStyle, preferredTone: m.preferredTone,
@@ -5471,10 +5554,17 @@ window.AIProvider = (function () {
       return { reply: m.text, actions: (m.actions || []).map((a) => ({ type: "assistant_op", payload: { act: a.act, label: a.label, payload: a.payload } })), learningUsed: [] };
     });
   }
-  async function generateScript(card, ctx) { return withClaude("generate_script", ctx, { cardId: card && card.id }, () => ({ data: { script: window.AI.generateScriptForCard(card, ctx && ctx.campaign || {}) }, reply: "Roteiro gerado (simulado).", actions: [], learningUsed: [] })); }
+  const camp = (ctx) => (ctx && ctx.campaign) || {};
+  async function generateScript(card, ctx) { return withClaude("generate_script", ctx, { cardId: card && card.id }, () => ({ data: { script: window.AI.generateScriptForCard(card, camp(ctx)) }, reply: "Roteiro gerado (simulado).", actions: [], learningUsed: [] })); }
   async function generateVariations(input, ctx) { return withClaude("generate_variations", ctx, input, () => ({ reply: "Variações geradas (simulado).", actions: [], learningUsed: [] })); }
   async function generateCampaign(input, ctx) { return withClaude("generate_campaign", ctx, input, () => ({ data: { plan: window.AI.generateCampaignPlan(input) }, reply: "Campanha planejada (simulado).", actions: [], learningUsed: [] })); }
+  async function generateCards(campaign, ctx) { return withClaude("generate_campaign", Object.assign({ campaign }, ctx), { campaignId: campaign && campaign.id, mode: "cards" }, () => ({ reply: "Cards gerados (simulado).", actions: [{ type: "create_cards", payload: { cards: [] } }], learningUsed: [] })); }
+  async function generateMainSpeech(card, ctx) { return withClaude("generate_script", ctx, { cardId: card && card.id, field: "mainSpeech" }, () => { const sc = window.AI.generateScriptForCard(card, camp(ctx)); return { data: { mainSpeech: sc.mainLine }, reply: "Fala principal gerada (simulado).", actions: [], learningUsed: [] }; }); }
+  async function generateCaption(card, ctx) { return withClaude("generate_script", ctx, { cardId: card && card.id, field: "caption" }, () => { const sc = window.AI.generateScriptForCard(card, camp(ctx)); return { data: { caption: sc.caption, hashtags: sc.hashtags }, reply: "Legenda gerada (simulado).", actions: [], learningUsed: [] }; }); }
+  async function generateChecklist(card, ctx) { return withClaude("generate_script", ctx, { cardId: card && card.id, field: "checklist" }, () => ({ data: { checklist: window.AI.generateChecklistForCard(card, camp(ctx)) }, reply: "Checklist gerado (simulado).", actions: [], learningUsed: [] })); }
+  async function generateVisualDirection(card, ctx) { return withClaude("generate_script", ctx, { cardId: card && card.id, field: "visual" }, () => ({ data: { visual: window.AI.generateVisualDirection(card, camp(ctx)) }, reply: "Visual gerado (simulado).", actions: [], learningUsed: [] })); }
   async function analyzeContent(card, ctx) { return withClaude("analyze_content", ctx, { cardId: card && card.id }, () => ({ data: { analysis: window.AI.analyzeUploadedVideoMock({ duration: 22 }, card) }, reply: "Análise (simulada).", actions: [], learningUsed: [] })); }
+  async function generateCorrection(card, analysis, ctx) { return withClaude("generate_correction", ctx, { cardId: card && card.id, analysis }, () => ({ data: { correction: window.AI.generateCorrectionFromAnalysis(card, analysis) }, reply: "Correção gerada (simulado).", actions: [], learningUsed: [] })); }
   async function createPublicationPlan(campaign, ctx) { return withClaude("create_publication_plan", ctx, { campaignId: campaign && campaign.id }, () => { window.PublishEngine.buildPlan(campaign); return { reply: "Plano montado (simulado).", actions: [], learningUsed: [] }; }); }
 
   // Executa actions[] que o Claude retornar (Frontend executa ação real)
@@ -5490,6 +5580,8 @@ window.AIProvider = (function () {
         else if (a.type === "generate_script" && ctx.card) { if (p.script) S.actions.updateCard(ctx.card.id, { script: p.script }); done++; }
         else if (a.type === "create_publication_plan" && ctx.campaign) { window.PublishEngine.buildPlan(ctx.campaign); done++; }
         else if (a.type === "move_status" && ctx.card && p.status) { S.actions.setCardStatus(ctx.card.id, p.status); done++; }
+        else if (a.type === "generate_correction" && ctx.card) { const anl = (ctx.card.analysis) || {}; const corr = p.correction || window.AI.generateCorrectionFromAnalysis(ctx.card, anl); if (window.CardView && window.CardView.applyCorrection) window.CardView.applyCorrection(ctx.card.id, corr); else if (p.correctedScript) S.actions.updateCard(ctx.card.id, { script: Object.assign({}, ctx.card.script, p.correctedScript) }); done++; }
+        else if (a.type === "save_learning") { if (window.LearningMemoryService) { if (p.kind === "rejection") window.LearningMemoryService.recordRejection(p); else if (p.kind === "edit") window.LearningMemoryService.recordEdit(p.before, p.after, p.field, p); else if (p.kind === "publication") window.LearningMemoryService.recordPublication(p); else window.LearningMemoryService.recordApproval(p); } done++; }
         else if (a.type === "save_to_library") { S.actions.addLibrary({ type: p.libType || "Aprendizado", title: p.title || "Item", content: p.content || "" }); done++; }
       } catch (e) { /* ignora action inválida */ }
     });
@@ -5497,8 +5589,16 @@ window.AIProvider = (function () {
   }
 
   function lastErr() { return lastError; }
-  return { isReal, base, status, testConnection, call, withClaude, assistantReply, generateScript, generateVariations, generateCampaign, analyzeContent, createPublicationPlan, executeActions, learningContext, lastErr };
+  return {
+    isReal, base, status, testConnection, call, withClaude, executeActions, learningContext, lastErr,
+    assistantReply, generateScript, generateVariations, generateCampaign, generateCards,
+    generateMainSpeech, generateCaption, generateChecklist, generateVisualDirection,
+    analyzeContent, generateCorrection, createPublicationPlan,
+  };
 })();
+
+/* Nome canônico pedido no roadmap. Todas as funções de IA passam por aqui. */
+window.AIProviderService = window.AIProvider;
 
 </script>
 <script>

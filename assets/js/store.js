@@ -17,7 +17,9 @@ window.Store = (function () {
   // migração leve: garante campos novos em estados salvos antigos
   function migrate() {
     if (!state.integrations) state.integrations = JSON.parse(JSON.stringify(window.SEED.integrations));
-    if (!state.learning) state.learning = { approvals: [], performance: [], preferences: { approvedHooks: [], rejectedHooks: [], approvedCTAs: [], rejectedReasons: [], preferredTone: "", winningFormats: [], losingFormats: [] } };
+    if (!state.learning) state.learning = { approvals: [], performance: [], edits: [], publicationLearnings: [], preferences: { approvedHooks: [], rejectedHooks: [], approvedCTAs: [], rejectedReasons: [], preferredTone: "", winningFormats: [], losingFormats: [] } };
+    if (!state.learning.edits) state.learning.edits = [];
+    if (!state.learning.publicationLearnings) state.learning.publicationLearnings = [];
     if (!state.ai) state.ai = { provider: "Modo Simulado", apiKey: "", model: "claude-sonnet-5", temperature: 0.7, maxTokens: 2000, status: "simulado" };
   }
 
