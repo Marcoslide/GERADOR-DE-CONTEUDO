@@ -2410,8 +2410,12 @@ window.Views = (function () {
         <div class="stat"><div class="s-label">📈 Conversão</div><div class="s-val">${esc(c.metrics.conversion)}</div></div>
       </div>
 
-      <div class="board-tabs">${["Cards", "Publicação", "Histórico"].map((v) => `<div class="board-tab ${v === campView ? "active" : ""}" data-campview="${v}">${v === "Publicação" ? "📅 " : v === "Histórico" ? "📜 " : ""}${v}</div>`).join("")}</div>
-      ${campView === "Publicação" ? pubView(c) : campView === "Histórico" ? histView(c) : `
+      <div class="board-tabs">${[["Cards", "🃏"], ["Variações", "🧪"], ["Plano", "📅"], ["Fila", "🗂️"], ["Análise do Teste", "📊"], ["Histórico", "📜"]].map(([v, ic]) => `<div class="board-tab ${v === campView ? "active" : ""}" data-campview="${v}">${ic} ${v}</div>`).join("")}</div>
+      ${campView === "Variações" ? variationsView(c)
+        : campView === "Plano" ? planView(c)
+        : campView === "Fila" ? filaView(c)
+        : campView === "Análise do Teste" ? testView(c)
+        : campView === "Histórico" ? histView(c) : `
       <div class="grid" style="grid-template-columns:1fr 1.3fr;align-items:start">
         <div>
           <div class="info-block"><h4>🎯 Estratégia da campanha</h4>
@@ -2429,18 +2433,43 @@ window.Views = (function () {
         </div>
         <div>
           <div class="section-title"><span class="st-ico">🃏</span><h2>Cards da campanha</h2><span class="st-count">${cards.length}</span>
-            <div class="st-actions"><button class="btn btn-sm" data-act="variations" data-camp="${id}">🧪 Variações</button><button class="btn btn-sm" data-act="new-card" data-camp="${id}">+ Card</button></div></div>
+            <div class="st-actions"><button class="btn btn-sm" data-campview="Variações">🧪 Variações</button><button class="btn btn-sm" data-act="new-card" data-camp="${id}">+ Card</button></div></div>
           <div class="grid" style="grid-template-columns:1fr 1fr">${cardsHTML || emptyState("🃏", "Sem cards", "Gere cards com IA.")}</div>
         </div>
       </div>`}`;
   }
 
-  // ---------- Plano + Fila de Publicação ----------
-  function pubView(c) {
+  // ---------- Máquina de Variações (seção visível) ----------
+  const VM_STYLES = ["Antes e depois", "Review", "Demonstração", "Prova social", "Objeção", "Oferta direta", "Bastidor", "Tutorial", "Comparação", "UGC natural", "Fundo branco", "Rua", "Produto na mão", "Ambiente real"];
+  const VM_CHANNELS = ["Instagram", "TikTok", "YouTube Shorts", "Stories", "Facebook", "Marketplace", "Anúncios"];
+  let vmForm = { qty: 10, channels: [], styles: [], mode: "Gerar, aprovar e publicar", product: "" };
+  function variationsView(c) {
+    const varis = S.sel.cardsByCampaign(c.id).filter((x) => x.isVariation);
+    const qtys = [["3", "3 variações"], ["5", "5 variações"], ["10", "10 variações"], ["15", "15 variações"], ["30", "30 dias de conteúdo"]];
+    const modes = ["Só gerar cards", "Gerar e agendar", "Gerar, aprovar e publicar", "Automático com regras"];
+    return `
+      <div class="info-block"><h4>🧪 Máquina de Variações</h4>
+        <p class="muted" style="margin-bottom:14px">Teste vários ângulos do mesmo produto para encontrar o vídeo vencedor.</p>
+        <div class="field"><label>Produto ou tema base</label><input class="input" id="vm-product" value="${esc(vmForm.product || c.productName || c.title)}"/></div>
+        <div class="field"><label>Quantidade de variações</label><div class="chip-select" id="vm-qty">${qtys.map(([q, l]) => `<div class="chip ${String(vmForm.qty) === q ? "on" : ""}" data-q="${q}">${l}</div>`).join("")}</div></div>
+        <div class="field"><label>Canais</label><div class="chip-select" id="vm-ch">${VM_CHANNELS.map((ch) => `<div class="chip ${vmForm.channels.includes(ch) ? "on" : ""}" data-ch="${esc(ch)}">${esc(ch)}</div>`).join("")}</div></div>
+        <div class="field"><label>Estilos para testar</label><div class="chip-select" id="vm-st">${VM_STYLES.map((s) => `<div class="chip ${vmForm.styles.includes(s) ? "on" : ""}" data-st="${esc(s)}">${esc(s)}</div>`).join("")}</div></div>
+        <div class="field"><label>Modo</label><div class="chip-select" id="vm-mode">${modes.map((m) => `<div class="chip ${vmForm.mode === m ? "on" : ""}" data-mode="${esc(m)}">${esc(m)}</div>`).join("")}</div></div>
+        <button class="btn btn-primary mt-16" data-vmgo="${c.id}">✨ Gerar variações</button>
+      </div>
+      <div class="section-title"><span class="st-ico">🧬</span><h2>Variações desta campanha</h2><span class="st-count">${varis.length}</span></div>
+      ${varis.length ? `<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(260px,1fr))">${varis.map((cd) => `
+        <div class="mini-card" data-open-card="${cd.id}" style="cursor:pointer">
+          <div class="mc-title">${esc(cd.title)}</div>
+          <div class="mc-meta">${pill(cd.status)} <span class="pill pill-gray">${esc(cd.channel)}</span>${cd.potential ? ` <span class="pill ${cd.potential === "Alto" ? "pill-accent" : "pill-amber"}">📈 ${esc(cd.potential)}</span>` : ""}</div>
+          <div class="mc-foot" style="font-size:11px">${esc(cd.scenario || "")}</div>
+        </div>`).join("")}</div>` : emptyState("🧬", "Nenhuma variação ainda", "Escolha a quantidade e clique em Gerar variações.")}`;
+  }
+
+  // ---------- Plano de Publicação (seção visível) ----------
+  function planView(c) {
     const PE = window.PublishEngine;
-    const q = PE.queue(c.id);
     const all = S.sel.cardsByCampaign(c.id).filter((x) => x.publication && x.publication.date);
-    // agrupa por data (plano)
     const byDate = {};
     all.forEach((x) => { (byDate[x.publication.date] = byDate[x.publication.date] || []).push(x); });
     const dias = Object.keys(byDate).sort();
@@ -2453,46 +2482,71 @@ window.Views = (function () {
             <span style="flex:1;cursor:pointer" data-open-card="${x.id}">${esc(x.title)}</span>
             ${pill(PE.pubStatus(x))}
           </div>`).join("")}
-      </div>`).join("") || emptyState("📅", "Sem plano ainda", "Gere cards para montar o plano.");
-
+      </div>`).join("") || emptyState("📅", "Sem plano ainda", "Gere o plano automaticamente ou crie variações.");
     const modes = PE.MODES.map((m) => `<span class="chip ${m === (c.publishMode || "Automático com aprovação") ? "on" : ""}" data-setmode="${esc(m)}">${esc(m)}</span>`).join("");
-    const filaRows = q.map((x) => `
+    return `
+      <div class="info-block"><h4>⚙️ Modo de publicação & regras</h4>
+        <div class="chip-select" style="margin-bottom:8px">${modes}</div>
+        <div class="flex gap-8 wrap" style="margin-top:6px">
+          <button class="btn btn-xs" data-pub="${c.automationPaused ? "resume" : "pause"}" data-id="${c.id}">${c.automationPaused ? "▶️ Retomar automação" : "⏸️ Pausar automação"}</button>
+          <button class="btn btn-xs" data-pub="process" data-id="${c.id}">⚡ Processar fila agora</button>
+        </div>
+        <div class="alert good" style="margin-top:10px"><span class="al-ico">🛡️</span><div class="al-body" style="font-size:11px">Regras: só publica aprovados · máx ${PE.rules(c).maxPerDay}/dia · horários ${esc(PE.rules(c).allowedHours)} · não publica sem mídia/legenda · pausa em erro. <span class="muted">Publicação em modo simulado. Estrutura pronta para integração real.</span></div></div>
+      </div>
+      <div class="section-title"><span class="st-ico">📅</span><h2>Plano de Publicação</h2>
+        <div class="st-actions"><button class="btn btn-sm" data-plan="gen" data-id="${c.id}">Gerar plano</button><button class="btn btn-sm" data-plan="approve-all" data-id="${c.id}">Aprovar tudo</button><button class="btn btn-sm" data-plan="schedule" data-id="${c.id}">Agendar aprovados</button><button class="btn btn-sm" data-plan="clear" data-id="${c.id}">Limpar</button></div></div>
+      ${plano}`;
+  }
+
+  // ---------- Fila de Publicação (seção visível) ----------
+  function filaView(c) {
+    const PE = window.PublishEngine;
+    const q = PE.queue(c.id);
+    const rows = q.map((x) => `
       <div class="scene-card" style="padding:12px">
-        <div class="flex gap-8 center wrap"><b style="flex:1;color:var(--text-0);cursor:pointer" data-open-card="${x.id}">${esc(x.title)}</b>${pill(PE.pubStatus(x))}</div>
+        <div class="flex gap-8 center wrap"><b style="flex:1;color:var(--text-0);cursor:pointer" data-open-card="${x.id}">${esc(x.title)}</b><span class="pill pill-gray">${esc(x.publication.channel || x.channel)}</span>${pill(PE.pubStatus(x))}</div>
         <div class="flex gap-8 center wrap" style="margin-top:8px">
           <input class="input" type="date" data-qdate="${x.id}" value="${esc(x.publication.date)}" style="max-width:150px"/>
           <input class="input" type="time" data-qtime="${x.id}" value="${esc(x.publication.time || "")}" style="max-width:110px"/>
-          <select class="select" data-qchan="${x.id}" style="max-width:150px">${["Instagram", "TikTok", "YouTube Shorts", "Facebook", "WhatsApp", "Marketplace", "Anúncios"].map((ch) => `<option ${ch === (x.publication.channel || x.channel) ? "selected" : ""}>${esc(ch)}</option>`).join("")}</select>
+          <select class="select" data-qchan="${x.id}" style="max-width:150px">${VM_CHANNELS.concat(["WhatsApp"]).map((ch) => `<option ${ch === (x.publication.channel || x.channel) ? "selected" : ""}>${esc(ch)}</option>`).join("")}</select>
         </div>
         <div class="flex gap-8 wrap" style="margin-top:8px">
           ${x.publication.approved ? "" : `<button class="btn btn-xs" data-pub="approve" data-id="${x.id}">✓ Aprovar</button>`}
           <button class="btn btn-xs" data-pub="schedule" data-id="${x.id}">📅 Agendar</button>
           <button class="btn btn-xs btn-primary" data-pub="now" data-id="${x.id}">🚀 Publicar agora</button>
-          <button class="btn btn-xs" data-pub="remove" data-id="${x.id}">Remover da fila</button>
+          <button class="btn btn-xs" data-pub="manual" data-id="${x.id}">✍️ Publicado manual</button>
+          <button class="btn btn-xs" data-pub="remove" data-id="${x.id}">Remover</button>
+          <button class="btn btn-xs" data-open-card="${x.id}">Abrir card</button>
         </div>
-      </div>`).join("") || `<p class="muted" style="font-size:12px">Fila vazia.</p>`;
-
+      </div>`).join("") || emptyState("🗂️", "Fila vazia", "Gere variações e o plano para preencher a fila.");
     return `
-      <div class="grid" style="grid-template-columns:1.1fr 1fr;align-items:start">
-        <div>
-          <div class="section-title"><span class="st-ico">📅</span><h2>Plano de Publicação</h2></div>
-          ${plano}
+      <div class="section-title"><span class="st-ico">🗂️</span><h2>Fila de Publicação</h2><span class="st-count">${q.length}</span>
+        <div class="st-actions"><button class="btn btn-sm" data-pub="process" data-id="${c.id}">⚡ Processar fila</button><button class="btn btn-sm" data-pub="cancel" data-id="${c.id}">Cancelar fila</button></div></div>
+      ${rows}`;
+  }
+
+  // ---------- Análise do Teste (comparar + explodir vencedor) ----------
+  function testView(c) {
+    const cards = S.sel.cardsByCampaign(c.id);
+    const withM = cards.filter((x) => x.analysis && x.analysis.done && x.analysis.metrics && x.analysis.metrics.views);
+    const score = (x) => { const m = x.analysis.metrics; return (m.views || 0) / 1000 + (parseInt(m.retention) || 0) * 2 + (m.sales || 0) * 10; };
+    const ranked = withM.map((x) => ({ x, s: score(x) })).sort((a, b) => b.s - a.s);
+    const best = ranked[0] && ranked[0].x, worst = ranked.length > 1 && ranked[ranked.length - 1].x;
+    return `
+      <div class="info-block"><h4>📊 Análise do Teste</h4>
+        <p class="muted" style="margin-bottom:10px">Compare as variações por desempenho e transforme o vencedor em novos testes.</p>
+        <div class="flex gap-8 wrap">
+          <button class="btn btn-sm" data-test="sim" data-id="${c.id}">🎲 Simular métricas dos publicados</button>
+          <button class="btn btn-primary btn-sm" data-test="explode" data-id="${c.id}">🏆 Explodir vencedor</button>
         </div>
-        <div>
-          <div class="info-block"><h4>⚙️ Modo de publicação</h4>
-            <div class="chip-select" style="margin-bottom:8px">${modes}</div>
-            <p class="muted" style="font-size:11px">“Automático com aprovação” só publica o que você aprovar. “Automático liberado” é avançado e vem desligado.</p>
-            <div class="flex gap-8 wrap" style="margin-top:10px">
-              <button class="btn btn-xs" data-pub="${c.automationPaused ? "resume" : "pause"}" data-id="${c.id}">${c.automationPaused ? "▶️ Retomar automação" : "⏸️ Pausar automação"}</button>
-              <button class="btn btn-xs" data-pub="process" data-id="${c.id}">⚡ Processar fila agora</button>
-              <button class="btn btn-xs" data-pub="cancel" data-id="${c.id}">Cancelar fila</button>
-            </div>
-            <div class="alert good" style="margin-top:10px"><span class="al-ico">🛡️</span><div class="al-body" style="font-size:11px">Travas: só publica aprovados · máx ${PE.rules(c).maxPerDay}/dia · horários ${esc(PE.rules(c).allowedHours)} · pausa em erro/queda de desempenho. <span class="muted">Publicação em modo simulado. Estrutura pronta para integração real.</span></div></div>
-          </div>
-          <div class="section-title"><span class="st-ico">🗂️</span><h2>Fila de Publicação</h2><span class="st-count">${q.length}</span></div>
-          ${filaRows}
-        </div>
-      </div>`;
+      </div>
+      ${withM.length ? `
+      <div class="grid grid-2" style="align-items:start">
+        <div class="info-block"><h4>🏆 Melhor variação</h4>${best ? `<div class="scene-card"><div class="scene-top"><span class="pill pill-accent">${esc(best.title)}</span></div><div class="kv" style="margin-top:6px"><div class="k">Views</div><div class="v">${fmt(best.analysis.metrics.views)}</div><div class="k">Retenção</div><div class="v">${esc(best.analysis.metrics.retention || "—")}</div><div class="k">Vendas</div><div class="v">${best.analysis.metrics.sales || 0}</div></div></div>` : "—"}</div>
+        <div class="info-block"><h4>⚠️ Pior variação</h4>${worst ? `<div class="scene-card"><div class="scene-top"><span class="pill pill-red">${esc(worst.title)}</span></div><div class="kv" style="margin-top:6px"><div class="k">Views</div><div class="v">${fmt(worst.analysis.metrics.views)}</div><div class="k">Retenção</div><div class="v">${esc(worst.analysis.metrics.retention || "—")}</div></div></div>` : '<p class="muted" style="font-size:12px">Precisa de mais dados.</p>'}</div>
+      </div>
+      <div class="info-block mb-0"><h4>📈 Ranking</h4>${ranked.map((r, i) => `<div class="status-row"><b style="width:26px">${i + 1}º</b><div style="flex:1">${esc(r.x.title)}</div><span class="muted">${fmt(r.x.analysis.metrics.views)} views · ret ${esc(r.x.analysis.metrics.retention || "—")}</span></div>`).join("")}</div>`
+      : emptyState("📊", "Sem métricas ainda", "Publique variações e clique em “Simular métricas dos publicados”.")}`;
   }
 
   function histView(c) {
@@ -2531,7 +2585,36 @@ window.Views = (function () {
       else if (act === "remove") { PE.setPub(id, { pubStatus: "Conteúdo gerado", date: "", time: "" }); U.toast("Removido da fila"); window.App.render(); }
       else if (act === "pause" || act === "resume") { PE.toggleAutomationPause(id); window.App.render(); }
       else if (act === "process") { PE.processQueue(id); }
+      else if (act === "manual") { PE.markPublished(id); window.App.render(); }
       else if (act === "cancel") { U.confirm("Cancelar toda a fila desta campanha?", () => { PE.cancelQueue(id); window.App.render(); }, { danger: true, yes: "Cancelar fila" }); }
+    });
+    // Máquina de Variações (seção inline)
+    root.querySelectorAll("#vm-qty .chip").forEach((el) => el.onclick = () => { vmForm.qty = +el.dataset.q; root.querySelectorAll("#vm-qty .chip").forEach((x) => x.classList.toggle("on", x === el)); });
+    root.querySelectorAll("#vm-ch .chip").forEach((el) => el.onclick = () => { const v = el.dataset.ch, i = vmForm.channels.indexOf(v); i >= 0 ? vmForm.channels.splice(i, 1) : vmForm.channels.push(v); el.classList.toggle("on"); });
+    root.querySelectorAll("#vm-st .chip").forEach((el) => el.onclick = () => { const v = el.dataset.st, i = vmForm.styles.indexOf(v); i >= 0 ? vmForm.styles.splice(i, 1) : vmForm.styles.push(v); el.classList.toggle("on"); });
+    root.querySelectorAll("#vm-mode .chip").forEach((el) => el.onclick = () => { vmForm.mode = el.dataset.mode; root.querySelectorAll("#vm-mode .chip").forEach((x) => x.classList.toggle("on", x === el)); });
+    root.querySelectorAll("[data-vmgo]").forEach((el) => el.onclick = () => {
+      const id = el.dataset.vmgo, camp = S.sel.campaign(id);
+      const prod = root.querySelector("#vm-product"); if (prod && prod.value.trim()) S.actions.updateCampaign(id, { productName: prod.value.trim() });
+      const ids = window.VariationMachine.generate(S.sel.campaign(id), vmForm.qty, { channels: vmForm.channels.length ? vmForm.channels : camp.channels, styles: vmForm.styles });
+      // aplica o modo escolhido
+      if (/agendar|aprovar|publicar|regras/i.test(vmForm.mode)) window.PublishEngine.buildPlan(S.sel.campaign(id));
+      U.toast(`${ids.length} variações criadas + plano de teste ✓`); window.App.render();
+    });
+    // Plano de Publicação — ações
+    root.querySelectorAll("[data-plan]").forEach((el) => el.onclick = () => {
+      const id = el.dataset.id, act = el.dataset.plan;
+      if (act === "gen") { PE.buildPlan(S.sel.campaign(id)); U.toast("Plano gerado ✓"); }
+      else if (act === "approve-all") { S.sel.cardsByCampaign(id).forEach((c) => PE.approve(c.id)); U.toast("Todos aprovados ✓"); }
+      else if (act === "schedule") { S.sel.cardsByCampaign(id).forEach((c) => { if (c.publication && c.publication.approved && c.publication.date) PE.schedule(c.id); }); U.toast("Aprovados agendados ✓"); }
+      else if (act === "clear") { U.confirm("Limpar o plano de publicação?", () => { S.sel.cardsByCampaign(id).forEach((c) => PE.setPub(c.id, { date: "", time: "", pubStatus: "Conteúdo gerado" })); U.toast("Plano limpo"); window.App.render(); }, { danger: true, yes: "Limpar" }); return; }
+      window.App.render();
+    });
+    // Análise do Teste
+    root.querySelectorAll("[data-test]").forEach((el) => el.onclick = () => {
+      const id = el.dataset.id, act = el.dataset.test;
+      if (act === "sim") { const pub = S.sel.cardsByCampaign(id).filter((c) => /Publicad/.test(PE.pubStatus(c))); if (!pub.length) { const any = S.sel.cardsByCampaign(id).slice(0, 5); any.forEach((c) => PE.collectMetrics(c.id)); U.toast("Métricas simuladas em " + any.length + " cards ✓"); } else { pub.forEach((c) => PE.collectMetrics(c.id)); U.toast("Métricas coletadas ✓"); } window.App.render(); }
+      else if (act === "explode") { const win = window.VariationMachine.markWinner(id); if (!win) return U.toast("Simule/insira métricas primeiro (botão ao lado)", "warn"); const ids = window.VariationMachine.explodeWinner(win.id); U.toast(`Vencedor: ${win.title}. ${ids.length} novas variações ✓`); window.App.render(); }
     });
   }
 
