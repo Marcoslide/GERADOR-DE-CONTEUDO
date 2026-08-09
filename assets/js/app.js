@@ -361,6 +361,27 @@ window.App = (function () {
     });
   }
 
+  // ---------- Máquina de Variações ----------
+  function variationMenu(campaignId) {
+    const camp = S.sel.campaign(campaignId);
+    const STYLES = ["Antes e depois", "Review", "Demonstração", "Prova social", "Resposta a objeção", "Oferta", "Bastidor", "Comparação", "UGC"];
+    let sel = [];
+    U.modal({
+      title: "🧪 Máquina de Variações", size: "",
+      body: `<p class="muted" style="margin-bottom:12px">Teste vários ângulos do mesmo produto para achar o vídeo vencedor. Cada variação vira um card real com cenário, formato, gancho e visual diferentes.</p>
+        <div class="field"><label>Quantidade</label><div class="chip-select" id="vm-qty">${["3", "5", "10", "15", "30"].map((q, i) => `<div class="chip ${q === "5" ? "on" : ""}" data-q="${q}">${q === "30" ? "30 dias" : q}</div>`).join("")}</div></div>
+        <div class="field mb-0"><label>Estilos para testar (opcional)</label><div class="chip-select" id="vm-styles">${STYLES.map((s) => `<div class="chip" data-vs="${esc(s)}">${esc(s)}</div>`).join("")}</div></div>`,
+      foot: `<button class="btn btn-ghost" data-close>Cancelar</button><button class="btn" id="vm-explode">🏆 Explodir vencedor</button><button class="btn btn-primary" id="vm-go">Gerar variações</button>`,
+      onMount: (o) => {
+        let qty = 5;
+        o.querySelectorAll("#vm-qty .chip").forEach((c) => c.onclick = () => { o.querySelectorAll("#vm-qty .chip").forEach((x) => x.classList.remove("on")); c.classList.add("on"); qty = c.dataset.q === "30" ? 30 : +c.dataset.q; });
+        o.querySelectorAll("#vm-styles .chip").forEach((c) => c.onclick = () => { c.classList.toggle("on"); const v = c.dataset.vs; const i = sel.indexOf(v); i >= 0 ? sel.splice(i, 1) : sel.push(v); });
+        o.querySelector("#vm-go").onclick = () => { const ids = window.VariationMachine.generate(camp, qty, { channels: camp.channels, styles: sel }); U.closeModal(); U.toast(`${ids.length} variações criadas + plano de teste ✓`); render(); };
+        o.querySelector("#vm-explode").onclick = () => { const win = window.VariationMachine.markWinner(campaignId); if (!win) return U.toast("Sem métricas para eleger vencedor — insira/colete métricas primeiro", "warn"); const ids = window.VariationMachine.explodeWinner(win.id); U.closeModal(); U.toast(`Vencedor: ${win.title}. ${ids.length} novas variações ✓`); render(); };
+      },
+    });
+  }
+
   // ---------- Board: menu de card e coluna ----------
   function cardMenu(id) {
     const c = S.sel.card(id);
@@ -445,7 +466,7 @@ window.App = (function () {
     U.renderChat();
   }
 
-  return { init, render, renderNav, openCard, openIdea, openCampaignForm, openCardForm, openIdeaForm, openPersonaForm, openLibForm, quickAction, generateCards, buyCredits, openCreateMenu, cardMenu, columnMenu, addColumn, libMenu, reuseLibrary };
+  return { init, render, renderNav, openCard, openIdea, openCampaignForm, openCardForm, openIdeaForm, openPersonaForm, openLibForm, quickAction, generateCards, buyCredits, openCreateMenu, cardMenu, columnMenu, addColumn, libMenu, reuseLibrary, variationMenu };
 })();
 
 document.addEventListener("DOMContentLoaded", window.App.init);

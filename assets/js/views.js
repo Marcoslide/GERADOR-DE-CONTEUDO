@@ -216,7 +216,7 @@ window.Views = (function () {
         </div>
         <div>
           <div class="section-title"><span class="st-ico">🃏</span><h2>Cards da campanha</h2><span class="st-count">${cards.length}</span>
-            <div class="st-actions"><button class="btn btn-sm" data-act="new-card" data-camp="${id}">+ Card</button></div></div>
+            <div class="st-actions"><button class="btn btn-sm" data-act="variations" data-camp="${id}">🧪 Variações</button><button class="btn btn-sm" data-act="new-card" data-camp="${id}">+ Card</button></div></div>
           <div class="grid" style="grid-template-columns:1fr 1fr">${cardsHTML || emptyState("🃏", "Sem cards", "Gere cards com IA.")}</div>
         </div>
       </div>`}`;
@@ -302,6 +302,7 @@ window.Views = (function () {
     root.querySelectorAll("[data-act='del-campaign']").forEach((el) => el.onclick = () => U.confirm("Excluir esta campanha e seus cards?", () => { S.actions.deleteCampaign(el.dataset.id); U.toast("Campanha excluída"); location.hash = "#/campanhas"; }, { danger: true, yes: "Excluir" }));
     root.querySelectorAll("[data-act='ai-cards']").forEach((el) => el.onclick = () => window.App.generateCards(el.dataset.id));
     root.querySelectorAll("[data-act='new-card']").forEach((el) => el.onclick = () => window.App.openCardForm(el.dataset.camp));
+    root.querySelectorAll("[data-act='variations']").forEach((el) => el.onclick = () => window.App.variationMenu(el.dataset.camp));
     // Publicação
     root.querySelectorAll("[data-campview]").forEach((el) => el.onclick = () => { campView = el.dataset.campview; window.App.render(); });
     root.querySelectorAll("[data-setmode]").forEach((el) => el.onclick = () => { const id = location.hash.split("/")[2]; S.actions.updateCampaign(id, { publishMode: el.dataset.setmode }); U.toast("Modo: " + el.dataset.setmode); window.App.render(); });

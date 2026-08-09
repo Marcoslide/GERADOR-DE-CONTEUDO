@@ -228,9 +228,16 @@ window.CampaignWizard = (function () {
     location.hash = "#/campanha/" + camp.id;
   }
 
+  function genCards(camp) {
+    // quantidade em "variações" ou "dias" → Máquina de Variações (ângulos distintos)
+    if (/varia/.test(w.quantity)) return window.VariationMachine.generate(camp, 10, { channels: camp.channels, styles: [w.style] });
+    if (/dias/.test(w.quantity)) return window.VariationMachine.generate(camp, 14, { channels: camp.channels, styles: [w.style] });
+    return AI.generateCardsForCampaign(camp, w.plan.cardPlan);
+  }
+
   function create() {
     const camp = newCampaign();
-    finish(camp, AI.generateCardsForCampaign(camp, w.plan.cardPlan));
+    finish(camp, genCards(camp));
   }
 
   function createFromResearch() {

@@ -43,7 +43,7 @@ window.CardView = (function () {
 
   function bind(root) {
     root.querySelectorAll("[data-tab]").forEach((el) => el.onclick = () => { tab = el.dataset.tab; refreshBody(); root.querySelectorAll("[data-tab]").forEach((x) => x.classList.toggle("active", x.dataset.tab === tab)); });
-    root.querySelector("[data-cardact='ai']").onclick = () => U.openChat("Card: " + card().title, "Estou no contexto deste card. Posso melhorar o gancho, gerar roteiro, criar checklist, analisar o vídeo ou criar uma correção. O que você quer?", ["Melhorar gancho", "Criar variação", "Gerar nova legenda", "Criar card de regravação", "Salvar na biblioteca"]);
+    root.querySelector("[data-cardact='ai']").onclick = () => U.openChatContext();
     root.querySelector("[data-cardact='delete']").onclick = () => U.confirm("Excluir este card?", () => { S.actions.deleteCard(cardId); U.closeModal(); U.toast("Card excluído"); window.App.render(); }, { danger: true, yes: "Excluir" });
     bindTab(root);
   }
@@ -921,5 +921,5 @@ window.CardView = (function () {
   function selStatus(val) { return `<select class="select" data-f="status">${S.get().statuses.map((s) => `<option ${s.name === val ? "selected" : ""}>${esc(s.name)}</option>`).join("")}</select>`; }
   function selPrio(val) { return `<select class="select" data-f="priority">${["Alta", "Média", "Baixa"].map((o) => `<option ${o === val ? "selected" : ""}>${esc(o)}</option>`).join("")}</select>`; }
 
-  return { open };
+  return { open, current: () => (document.getElementById("modal-overlay") && document.querySelector(".drawer-tabs") ? cardId : null), refresh: () => { const el = document.getElementById("card-tab-body"); if (el) refreshBody(); } };
 })();

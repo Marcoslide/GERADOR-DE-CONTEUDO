@@ -231,7 +231,7 @@ window.SEED = (function () {
     { name: "Gravado", color: "#a3e635" }, { name: "Enviado para análise", color: "#a78bfa" }, { name: "Precisa corrigir", color: "#ef4444" },
     { name: "Em edição", color: "#f59e0b" }, { name: "Aguardando aprovação", color: "#ec4899" }, { name: "Pronto para publicar", color: "#34d399" },
     { name: "Publicado", color: "#10b981" }, { name: "Analisando resultado", color: "#22d3ee" }, { name: "Virou novo teste", color: "#a78bfa" },
-    { name: "Concluído", color: "#62756e" },
+    { name: "Variação criada", color: "#a3e635" }, { name: "Vencedor", color: "#10b981" }, { name: "Concluído", color: "#62756e" },
   ];
 
   const integrations = {
