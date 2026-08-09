@@ -98,7 +98,22 @@ window.UI = (function () {
   function chatReply(userText) {
     chatState.messages.push({ role: "user", text: userText });
     renderChat(); scrollChat();
-    setTimeout(() => { const res = window.Assistant.reply(userText, ctx()); pushAI(res); }, 350);
+    // Claude real quando configurado; senão, cérebro simulado (Assistant).
+    if (window.AIProvider && window.AIProvider.isReal()) {
+      chatState.messages.push({ role: "ai", text: "…", actions: [], _typing: true }); renderChat(); scrollChat();
+      window.AIProvider.assistantReply(userText, ctx()).then((res) => {
+        chatState.messages = chatState.messages.filter((m) => !m._typing);
+        if (res.source === "claude") {
+          const n = window.AIProvider.executeActions(res.actions, ctx());
+          const note = (res.learningUsed && res.learningUsed.length) ? `<div class="muted" style="font-size:11px;margin-top:6px">🧠 usei: ${res.learningUsed.map((x) => esc(x)).join(" · ")}</div>` : "";
+          chatState.messages.push({ role: "ai", text: (res.reply || "Feito. ✓") + note, actions: [] });
+          if (n > 0) window.App.render();
+          renderChat(); scrollChat();
+        } else { pushAI({ text: window.Assistant.reply(userText, ctx()).text, actions: window.Assistant.reply(userText, ctx()).actions }); }
+      }).catch(() => { chatState.messages = chatState.messages.filter((m) => !m._typing); const m = window.Assistant.reply(userText, ctx()); pushAI(m); });
+    } else {
+      setTimeout(() => { const res = window.Assistant.reply(userText, ctx()); pushAI(res); }, 300);
+    }
   }
 
   function runAction(mi, ai) {

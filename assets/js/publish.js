@@ -83,6 +83,8 @@ window.PublishEngine = (function () {
   // Publica agora (simulado): Publicando → Publicado, gera link, registra histórico
   function publishNow(cardId, onDone) {
     const c = S.sel.card(cardId);
+    // roteia pelo PublicationProviderService (hoje: provider mock; preparado p/ Meta/TikTok real)
+    if (window.PublicationProviderService) window.PublicationProviderService.publishNow({ cardId, channel: c.publication && c.publication.channel });
     const real = integrationReady(c.publication && c.publication.channel);
     setPub(cardId, { pubStatus: "Publicando" });
     S.actions.setCardStatus(cardId, "Publicado");

@@ -708,17 +708,22 @@ window.Views = (function () {
 
   function aiPanel() {
     const ai = S.get().ai || {};
-    const stPill = { conectado: "pill-accent", simulado: "pill-amber", erro: "pill-red" }[ai.status] || "pill-gray";
+    const real = ai.provider === "Claude Real";
+    const stMap = { conectado: ["pill-accent", "Claude conectado"], simulado: ["pill-amber", "Modo simulado ativo"], conectando: ["pill-blue", "Conectando…"], offline: ["pill-red", "Backend offline"], sem_chave: ["pill-red", "Chave ausente no backend"], erro: ["pill-red", "Erro na resposta"] };
+    const [stCls, stTxt] = stMap[ai.status] || ["pill-gray", ai.status || "—"];
     return `
       <div class="info-block"><h4>🤖 IA Principal</h4>
-        <div class="field"><label>Provedor</label><select class="select" data-ai="provider"><option ${ai.provider === "Modo Simulado" ? "selected" : ""}>Modo Simulado</option><option ${ai.provider === "Claude" ? "selected" : ""}>Claude</option></select></div>
-        <div class="field"><label>Modelo</label><select class="select" data-ai="model">${["claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5-20251001"].map((m) => `<option ${m === ai.model ? "selected" : ""}>${m}</option>`).join("")}</select></div>
-        <div class="form-row"><div class="field"><label>Temperatura</label><input class="input" type="number" step="0.1" min="0" max="1" data-ai="temperature" value="${ai.temperature}"/></div><div class="field"><label>Máx. tokens</label><input class="input" type="number" data-ai="maxTokens" value="${ai.maxTokens}"/></div></div>
-        <div class="field"><label>API Key (ou endpoint do backend)</label><input class="input" type="password" data-ai="apiKey" value="${esc(ai.apiKey || "")}" placeholder="Configure no backend — não exponha no frontend"/></div>
-        <div class="flex gap-8 center wrap"><span class="pill ${stPill}">${esc(ai.status)}</span><button class="btn btn-sm" data-act="ai-test">Testar conexão</button><button class="btn btn-primary btn-sm" data-act="ai-save">Salvar</button><button class="btn btn-sm" data-act="ai-simulated">Voltar ao simulado</button></div>
+        <div class="field"><label>Modo</label><select class="select" data-ai="provider"><option ${!real ? "selected" : ""}>Modo Simulado</option><option ${real ? "selected" : ""}>Claude Real</option></select></div>
+        <div id="ai-real-fields" style="${real ? "" : "display:none"}">
+          <div class="field"><label>URL do backend</label><input class="input" data-ai="backendUrl" value="${esc(ai.backendUrl || "")}" placeholder="http://localhost:3000 (vazio = mesma origem)"/></div>
+          <div class="form-row"><div class="field"><label>Modelo Claude</label><select class="select" data-ai="model">${["claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5-20251001"].map((m) => `<option ${m === ai.model ? "selected" : ""}>${m}</option>`).join("")}</select></div><div class="field"><label>Temperatura</label><input class="input" type="number" step="0.1" min="0" max="1" data-ai="temperature" value="${ai.temperature}"/></div></div>
+          <div class="field"><label>Máx. tokens</label><input class="input" type="number" data-ai="maxTokens" value="${ai.maxTokens}"/></div>
+        </div>
+        <div class="flex gap-8 center wrap" style="margin-top:6px"><span class="pill ${stCls}" id="ai-status-pill">${esc(stTxt)}</span><button class="btn btn-sm" data-act="ai-test">Testar conexão</button><button class="btn btn-primary btn-sm" data-act="ai-save">Salvar configuração</button><button class="btn btn-sm" data-act="ai-simulated">Voltar ao simulado</button></div>
+        <div class="alert warn" style="margin-top:12px"><span class="al-ico">🔐</span><div class="al-body" style="font-size:12px">A chave <code>ANTHROPIC_API_KEY</code> deve ficar <b>no backend</b>. Não exponha chave no navegador.</div></div>
       </div>
-      <div class="info-block mb-0"><h4>🔐 Arquitetura recomendada</h4>
-        <p class="muted" style="font-size:12px;line-height:1.6">Em produção, a API Key <b>não</b> deve ficar no frontend. O fluxo correto é:<br><code style="color:var(--accent-2)">Frontend Viraliza → Backend Viraliza → Claude API</code><br>O backend recebe <code>POST /api/ai/claude</code>, lê <code>ANTHROPIC_API_KEY</code> do ambiente, chama o Claude e retorna JSON estruturado. No MVP a geração roda em <b>modo simulado</b> com a memória operacional; a arquitetura (<code>AIProviderService</code>) já está pronta para plugar o backend.</p>
+      <div class="info-block mb-0"><h4>🔌 Como ligar o Claude real</h4>
+        <p class="muted" style="font-size:12px;line-height:1.6"><code style="color:var(--accent-2)">Frontend → /api/ai/claude → Claude API</code>. Rode o backend em <code>server/</code> (<code>npm install && npm start</code> com a <code>ANTHROPIC_API_KEY</code> no <code>.env</code>), abra o app por <code>http://localhost:3000</code>, escolha <b>Claude Real</b> aqui e <b>Testar conexão</b>. Sem backend/chave, tudo funciona em <b>modo simulado</b> (mock) automaticamente. Todas as gerações passam pelo <code>AIProviderService</code>.</p>
       </div>`;
   }
 
@@ -769,9 +774,28 @@ window.Views = (function () {
     const addStatus = root.querySelector("[data-act='add-status']");
     if (addStatus) addStatus.onclick = () => { const n = root.querySelector("#new-status-name").value.trim(); const c = root.querySelector("#new-status-color").value; if (!n) return U.toast("Digite um nome", "warn"); S.actions.addStatus(n, c); U.toast("Status adicionado"); };
     // IA e APIs
-    root.querySelectorAll("[data-ai]").forEach((el) => el.onchange = () => S.update((s) => { s.ai[el.dataset.ai] = el.type === "number" ? +el.value : el.value; }));
-    root.querySelectorAll("[data-act='ai-test']").forEach((el) => el.onclick = () => { const ai = S.get().ai; if (ai.provider === "Claude" && !ai.apiKey) return U.simulated("Testar conexão Claude", "Configure a API Key no backend. Rodando em modo simulado."); U.toast("Conexão testada (simulado) ✓"); });
-    root.querySelectorAll("[data-act='ai-save']").forEach((el) => el.onclick = () => { S.update((s) => { s.ai.status = s.ai.provider === "Claude" ? "conectado" : "simulado"; }); U.toast("Configuração de IA salva ✓"); window.App.render(); });
+    root.querySelectorAll("[data-ai]").forEach((el) => el.onchange = () => {
+      S.update((s) => { s.ai[el.dataset.ai] = el.type === "number" ? +el.value : el.value; });
+      if (el.dataset.ai === "provider") { const rf = root.querySelector("#ai-real-fields"); if (rf) rf.style.display = el.value === "Claude Real" ? "" : "none"; S.update((s) => { s.ai.status = el.value === "Claude Real" ? "conectando" : "simulado"; }); }
+    });
+    root.querySelectorAll("[data-act='ai-test']").forEach((el) => el.onclick = async () => {
+      const ai = S.get().ai;
+      if (ai.provider !== "Claude Real") return U.toast("Selecione “Claude Real” para testar o backend", "warn");
+      const pill = root.querySelector("#ai-status-pill"); if (pill) { pill.textContent = "Conectando…"; pill.className = "pill pill-blue"; }
+      const st = await window.AIProvider.status();
+      if (!st.success) { S.update((s) => s.ai.status = "offline"); U.toast("Backend offline em " + (window.AIProvider.base() || "mesma origem"), "warn"); window.App.render(); return; }
+      if (!st.configured) { S.update((s) => s.ai.status = "sem_chave"); U.toast("Backend OK, mas sem ANTHROPIC_API_KEY — modo simulado", "warn"); window.App.render(); return; }
+      const t = await window.AIProvider.testConnection();
+      S.update((s) => s.ai.status = t.success ? "conectado" : "erro");
+      U.toast(t.success ? "Claude conectado ✓" : ("Erro: " + ((t.error && t.error.message) || "")), t.success ? "" : "warn");
+      window.App.render();
+    });
+    root.querySelectorAll("[data-act='ai-save']").forEach((el) => el.onclick = async () => {
+      const ai = S.get().ai;
+      if (ai.provider === "Claude Real") { const st = await window.AIProvider.status(); S.update((s) => s.ai.status = !st.success ? "offline" : !st.configured ? "sem_chave" : "conectado"); }
+      else S.update((s) => s.ai.status = "simulado");
+      U.toast("Configuração de IA salva ✓"); window.App.render();
+    });
     root.querySelectorAll("[data-act='ai-simulated']").forEach((el) => el.onclick = () => { S.update((s) => { s.ai.provider = "Modo Simulado"; s.ai.status = "simulado"; }); U.toast("Voltou ao modo simulado"); window.App.render(); });
     // Aprendizados
     root.querySelectorAll("[data-lforget]").forEach((el) => el.onclick = () => { window.Learning.forget(el.dataset.lforget); U.toast("Aprendizado esquecido"); window.App.render(); });

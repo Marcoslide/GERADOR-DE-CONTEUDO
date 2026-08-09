@@ -25,7 +25,7 @@ console.log(`VIRALIZA.html gerado (${kb} KB)`);
 
 // Versão para publicação (Artifact / página web): conteúdo interno, sem <!DOCTYPE>/<html>/<head>/<body>
 const css = fs.readFileSync(path.join(root, "assets/css/styles.css"), "utf8");
-const jsOrder = ["seed", "store", "learning", "ai", "research", "components", "publish", "variations", "views", "video", "recorder", "campaign", "card", "assistant", "app"];
+const jsOrder = ["seed", "store", "learning", "ai", "research", "components", "publish", "publication-provider", "variations", "views", "video", "recorder", "campaign", "card", "assistant", "aiprovider", "app"];
 const scripts = jsOrder.map((n) => `<script>\n${fs.readFileSync(path.join(root, "assets/js/" + n + ".js"), "utf8")}\n</script>`).join("\n");
 const appMarkup = `<div class="app"><aside class="sidebar" id="sidebar"></aside><div class="main"><header class="header" id="header"></header><main class="content" id="content"></main></div></div>`;
 const artifact = `<style>\n${css}\n</style>\n${appMarkup}\n${scripts}\n`;

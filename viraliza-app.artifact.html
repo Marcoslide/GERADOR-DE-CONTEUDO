@@ -1829,7 +1829,22 @@ window.UI = (function () {
   function chatReply(userText) {
     chatState.messages.push({ role: "user", text: userText });
     renderChat(); scrollChat();
-    setTimeout(() => { const res = window.Assistant.reply(userText, ctx()); pushAI(res); }, 350);
+    // Claude real quando configurado; senão, cérebro simulado (Assistant).
+    if (window.AIProvider && window.AIProvider.isReal()) {
+      chatState.messages.push({ role: "ai", text: "…", actions: [], _typing: true }); renderChat(); scrollChat();
+      window.AIProvider.assistantReply(userText, ctx()).then((res) => {
+        chatState.messages = chatState.messages.filter((m) => !m._typing);
+        if (res.source === "claude") {
+          const n = window.AIProvider.executeActions(res.actions, ctx());
+          const note = (res.learningUsed && res.learningUsed.length) ? `<div class="muted" style="font-size:11px;margin-top:6px">🧠 usei: ${res.learningUsed.map((x) => esc(x)).join(" · ")}</div>` : "";
+          chatState.messages.push({ role: "ai", text: (res.reply || "Feito. ✓") + note, actions: [] });
+          if (n > 0) window.App.render();
+          renderChat(); scrollChat();
+        } else { pushAI({ text: window.Assistant.reply(userText, ctx()).text, actions: window.Assistant.reply(userText, ctx()).actions }); }
+      }).catch(() => { chatState.messages = chatState.messages.filter((m) => !m._typing); const m = window.Assistant.reply(userText, ctx()); pushAI(m); });
+    } else {
+      setTimeout(() => { const res = window.Assistant.reply(userText, ctx()); pushAI(res); }, 300);
+    }
   }
 
   function runAction(mi, ai) {
@@ -1967,6 +1982,8 @@ window.PublishEngine = (function () {
   // Publica agora (simulado): Publicando → Publicado, gera link, registra histórico
   function publishNow(cardId, onDone) {
     const c = S.sel.card(cardId);
+    // roteia pelo PublicationProviderService (hoje: provider mock; preparado p/ Meta/TikTok real)
+    if (window.PublicationProviderService) window.PublicationProviderService.publishNow({ cardId, channel: c.publication && c.publication.channel });
     const real = integrationReady(c.publication && c.publication.channel);
     setPub(cardId, { pubStatus: "Publicando" });
     S.actions.setCardStatus(cardId, "Publicado");
@@ -2086,6 +2103,41 @@ window.PublishEngine = (function () {
     processQueue, queue, scheduledAll, dueToday, addHistory, toggleAutomationPause, cancelQueue, rules,
     collectMetrics, connect, disconnect, mockLink, integrationReady,
   };
+})();
+
+</script>
+<script>
+/* ============================================================
+   VIRALIZA — PublicationProviderService
+   Abstração de publicação. Hoje: provider "mock" (simulado,
+   funcional). Preparado para Meta / TikTok / YouTube reais
+   (tokens sempre no backend, nunca no frontend).
+   ============================================================ */
+window.PublicationProviderService = (function () {
+  const S = window.Store;
+
+  function providerFor(channel) {
+    const it = S.get().integrations || {};
+    if (/Instagram|Facebook|Reels/i.test(channel) && it.meta && it.meta.status === "conectado") return "meta";
+    if (/TikTok/i.test(channel) && it.tiktok && it.tiktok.status === "conectado") return "tiktok";
+    if (/YouTube|Shorts/i.test(channel)) return "youtube";
+    return "mock";
+  }
+
+  // No MVP tudo cai no provider mock (real exige backend com OAuth/tokens).
+  function publishNow(item) {
+    const provider = providerFor(item && item.channel);
+    // Estrutura pronta: quando o provider real existir, aqui chamaria o backend.
+    return { provider, mode: provider === "mock" ? "simulado" : "real-preparado", status: "Publicando" };
+  }
+  function schedulePost(item) { return { provider: providerFor(item && item.channel), status: "Agendado" }; }
+  function getStatus(item) { return { status: "desconhecido", provider: providerFor(item && item.channel) }; }
+  function syncMetrics(item) { return { synced: false, note: "Sincronização real via backend (preparado)." }; }
+
+  const MODES = ["mock", "manual", "agendado com lembrete", "automático com aprovação", "automático liberado"];
+  const PROVIDERS = ["Meta", "TikTok", "YouTube Shorts", "Manual/Mock"];
+
+  return { providerFor, publishNow, schedulePost, getStatus, syncMetrics, MODES, PROVIDERS };
 })();
 
 </script>
@@ -2921,17 +2973,22 @@ window.Views = (function () {
 
   function aiPanel() {
     const ai = S.get().ai || {};
-    const stPill = { conectado: "pill-accent", simulado: "pill-amber", erro: "pill-red" }[ai.status] || "pill-gray";
+    const real = ai.provider === "Claude Real";
+    const stMap = { conectado: ["pill-accent", "Claude conectado"], simulado: ["pill-amber", "Modo simulado ativo"], conectando: ["pill-blue", "Conectando…"], offline: ["pill-red", "Backend offline"], sem_chave: ["pill-red", "Chave ausente no backend"], erro: ["pill-red", "Erro na resposta"] };
+    const [stCls, stTxt] = stMap[ai.status] || ["pill-gray", ai.status || "—"];
     return `
       <div class="info-block"><h4>🤖 IA Principal</h4>
-        <div class="field"><label>Provedor</label><select class="select" data-ai="provider"><option ${ai.provider === "Modo Simulado" ? "selected" : ""}>Modo Simulado</option><option ${ai.provider === "Claude" ? "selected" : ""}>Claude</option></select></div>
-        <div class="field"><label>Modelo</label><select class="select" data-ai="model">${["claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5-20251001"].map((m) => `<option ${m === ai.model ? "selected" : ""}>${m}</option>`).join("")}</select></div>
-        <div class="form-row"><div class="field"><label>Temperatura</label><input class="input" type="number" step="0.1" min="0" max="1" data-ai="temperature" value="${ai.temperature}"/></div><div class="field"><label>Máx. tokens</label><input class="input" type="number" data-ai="maxTokens" value="${ai.maxTokens}"/></div></div>
-        <div class="field"><label>API Key (ou endpoint do backend)</label><input class="input" type="password" data-ai="apiKey" value="${esc(ai.apiKey || "")}" placeholder="Configure no backend — não exponha no frontend"/></div>
-        <div class="flex gap-8 center wrap"><span class="pill ${stPill}">${esc(ai.status)}</span><button class="btn btn-sm" data-act="ai-test">Testar conexão</button><button class="btn btn-primary btn-sm" data-act="ai-save">Salvar</button><button class="btn btn-sm" data-act="ai-simulated">Voltar ao simulado</button></div>
+        <div class="field"><label>Modo</label><select class="select" data-ai="provider"><option ${!real ? "selected" : ""}>Modo Simulado</option><option ${real ? "selected" : ""}>Claude Real</option></select></div>
+        <div id="ai-real-fields" style="${real ? "" : "display:none"}">
+          <div class="field"><label>URL do backend</label><input class="input" data-ai="backendUrl" value="${esc(ai.backendUrl || "")}" placeholder="http://localhost:3000 (vazio = mesma origem)"/></div>
+          <div class="form-row"><div class="field"><label>Modelo Claude</label><select class="select" data-ai="model">${["claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5-20251001"].map((m) => `<option ${m === ai.model ? "selected" : ""}>${m}</option>`).join("")}</select></div><div class="field"><label>Temperatura</label><input class="input" type="number" step="0.1" min="0" max="1" data-ai="temperature" value="${ai.temperature}"/></div></div>
+          <div class="field"><label>Máx. tokens</label><input class="input" type="number" data-ai="maxTokens" value="${ai.maxTokens}"/></div>
+        </div>
+        <div class="flex gap-8 center wrap" style="margin-top:6px"><span class="pill ${stCls}" id="ai-status-pill">${esc(stTxt)}</span><button class="btn btn-sm" data-act="ai-test">Testar conexão</button><button class="btn btn-primary btn-sm" data-act="ai-save">Salvar configuração</button><button class="btn btn-sm" data-act="ai-simulated">Voltar ao simulado</button></div>
+        <div class="alert warn" style="margin-top:12px"><span class="al-ico">🔐</span><div class="al-body" style="font-size:12px">A chave <code>ANTHROPIC_API_KEY</code> deve ficar <b>no backend</b>. Não exponha chave no navegador.</div></div>
       </div>
-      <div class="info-block mb-0"><h4>🔐 Arquitetura recomendada</h4>
-        <p class="muted" style="font-size:12px;line-height:1.6">Em produção, a API Key <b>não</b> deve ficar no frontend. O fluxo correto é:<br><code style="color:var(--accent-2)">Frontend Viraliza → Backend Viraliza → Claude API</code><br>O backend recebe <code>POST /api/ai/claude</code>, lê <code>ANTHROPIC_API_KEY</code> do ambiente, chama o Claude e retorna JSON estruturado. No MVP a geração roda em <b>modo simulado</b> com a memória operacional; a arquitetura (<code>AIProviderService</code>) já está pronta para plugar o backend.</p>
+      <div class="info-block mb-0"><h4>🔌 Como ligar o Claude real</h4>
+        <p class="muted" style="font-size:12px;line-height:1.6"><code style="color:var(--accent-2)">Frontend → /api/ai/claude → Claude API</code>. Rode o backend em <code>server/</code> (<code>npm install && npm start</code> com a <code>ANTHROPIC_API_KEY</code> no <code>.env</code>), abra o app por <code>http://localhost:3000</code>, escolha <b>Claude Real</b> aqui e <b>Testar conexão</b>. Sem backend/chave, tudo funciona em <b>modo simulado</b> (mock) automaticamente. Todas as gerações passam pelo <code>AIProviderService</code>.</p>
       </div>`;
   }
 
@@ -2982,9 +3039,28 @@ window.Views = (function () {
     const addStatus = root.querySelector("[data-act='add-status']");
     if (addStatus) addStatus.onclick = () => { const n = root.querySelector("#new-status-name").value.trim(); const c = root.querySelector("#new-status-color").value; if (!n) return U.toast("Digite um nome", "warn"); S.actions.addStatus(n, c); U.toast("Status adicionado"); };
     // IA e APIs
-    root.querySelectorAll("[data-ai]").forEach((el) => el.onchange = () => S.update((s) => { s.ai[el.dataset.ai] = el.type === "number" ? +el.value : el.value; }));
-    root.querySelectorAll("[data-act='ai-test']").forEach((el) => el.onclick = () => { const ai = S.get().ai; if (ai.provider === "Claude" && !ai.apiKey) return U.simulated("Testar conexão Claude", "Configure a API Key no backend. Rodando em modo simulado."); U.toast("Conexão testada (simulado) ✓"); });
-    root.querySelectorAll("[data-act='ai-save']").forEach((el) => el.onclick = () => { S.update((s) => { s.ai.status = s.ai.provider === "Claude" ? "conectado" : "simulado"; }); U.toast("Configuração de IA salva ✓"); window.App.render(); });
+    root.querySelectorAll("[data-ai]").forEach((el) => el.onchange = () => {
+      S.update((s) => { s.ai[el.dataset.ai] = el.type === "number" ? +el.value : el.value; });
+      if (el.dataset.ai === "provider") { const rf = root.querySelector("#ai-real-fields"); if (rf) rf.style.display = el.value === "Claude Real" ? "" : "none"; S.update((s) => { s.ai.status = el.value === "Claude Real" ? "conectando" : "simulado"; }); }
+    });
+    root.querySelectorAll("[data-act='ai-test']").forEach((el) => el.onclick = async () => {
+      const ai = S.get().ai;
+      if (ai.provider !== "Claude Real") return U.toast("Selecione “Claude Real” para testar o backend", "warn");
+      const pill = root.querySelector("#ai-status-pill"); if (pill) { pill.textContent = "Conectando…"; pill.className = "pill pill-blue"; }
+      const st = await window.AIProvider.status();
+      if (!st.success) { S.update((s) => s.ai.status = "offline"); U.toast("Backend offline em " + (window.AIProvider.base() || "mesma origem"), "warn"); window.App.render(); return; }
+      if (!st.configured) { S.update((s) => s.ai.status = "sem_chave"); U.toast("Backend OK, mas sem ANTHROPIC_API_KEY — modo simulado", "warn"); window.App.render(); return; }
+      const t = await window.AIProvider.testConnection();
+      S.update((s) => s.ai.status = t.success ? "conectado" : "erro");
+      U.toast(t.success ? "Claude conectado ✓" : ("Erro: " + ((t.error && t.error.message) || "")), t.success ? "" : "warn");
+      window.App.render();
+    });
+    root.querySelectorAll("[data-act='ai-save']").forEach((el) => el.onclick = async () => {
+      const ai = S.get().ai;
+      if (ai.provider === "Claude Real") { const st = await window.AIProvider.status(); S.update((s) => s.ai.status = !st.success ? "offline" : !st.configured ? "sem_chave" : "conectado"); }
+      else S.update((s) => s.ai.status = "simulado");
+      U.toast("Configuração de IA salva ✓"); window.App.render();
+    });
     root.querySelectorAll("[data-act='ai-simulated']").forEach((el) => el.onclick = () => { S.update((s) => { s.ai.provider = "Modo Simulado"; s.ai.status = "simulado"; }); U.toast("Voltou ao modo simulado"); window.App.render(); });
     // Aprendizados
     root.querySelectorAll("[data-lforget]").forEach((el) => el.onclick = () => { window.Learning.forget(el.dataset.lforget); U.toast("Aprendizado esquecido"); window.App.render(); });
@@ -5323,6 +5399,105 @@ window.Assistant = (function () {
   function learnPattern(cards) { const types = {}; cards.forEach((c) => types[c.type] = (types[c.type] || 0) + 1); const top = Object.keys(types).sort((a, b) => types[b] - types[a])[0]; return `📚 Padrão: vídeos de <b>${esc(top || "Antes e depois")}</b> vêm performando melhor. Recomendo criar mais variações desse tipo.`; }
 
   return { getContext, header, greeting, quickButtons, reply, exec, label };
+})();
+
+</script>
+<script>
+/* ============================================================
+   VIRALIZA — AIProviderService (frontend)
+   Ponto único de IA. Se "Claude Real" estiver configurado e o
+   backend responder, usa Claude via /api/ai/claude; senão cai
+   para o MockAIEngine (window.AI / Assistant) e avisa.
+   ============================================================ */
+window.AIProvider = (function () {
+  const S = window.Store, U = window.UI;
+  function cfg() { return S.get().ai || {}; }
+  function isReal() { return cfg().provider === "Claude Real"; }
+  function base() { return (cfg().backendUrl || "").replace(/\/+$/, ""); } // "" = mesma origem
+  function urlOf(p) { return base() + p; }
+
+  async function status() {
+    try { const r = await fetch(urlOf("/api/ai/status")); return await r.json(); }
+    catch (e) { return { success: false, error: { type: "backend_error", message: String(e) } }; }
+  }
+  async function testConnection() {
+    try { const r = await fetch(urlOf("/api/ai/test"), { method: "POST" }); return await r.json(); }
+    catch (e) { return { success: false, error: { type: "backend_error", message: "Backend offline em " + (base() || "mesma origem") } }; }
+  }
+
+  function learningContext() {
+    if (!window.Learning) return {};
+    const m = window.Learning.getRelevantMemory("generate", {});
+    return {
+      approvedStyle: m.approvedStyle, rejectedStyle: m.rejectedStyle, preferredTone: m.preferredTone,
+      preferredHooks: (m.approvedStyle && m.approvedStyle.hooks) || [], rejectedHooks: (m.rejectedStyle && m.rejectedStyle.hooks) || [],
+      performanceInsights: m.performanceInsights,
+    };
+  }
+  function slim(ctx) {
+    ctx = ctx || {};
+    const out = { view: ctx.view };
+    if (ctx.campaign) out.campaign = { id: ctx.campaign.id, title: ctx.campaign.title, product: ctx.campaign.productName, objective: ctx.campaign.objective, audience: ctx.campaign.audience, channels: ctx.campaign.channels, cards: S.sel.cardsByCampaign(ctx.campaign.id).length };
+    if (ctx.card) out.card = { id: ctx.card.id, title: ctx.card.title, type: ctx.card.type, status: ctx.card.status, script: ctx.card.script, hasVideo: !!(ctx.card.video && ctx.card.video.versions && ctx.card.video.versions.length), analysis: ctx.card.analysis && ctx.card.analysis.done };
+    return out;
+  }
+
+  let lastError = null;
+  function notifyErr(err) { lastError = err; const t = err && err.type; const msg = t === "api_key_missing" ? "Claude sem chave no backend — usando modo simulado" : t === "backend_error" ? "Backend offline — usando modo simulado" : t === "invalid_json" ? "Claude respondeu fora do formato — usando simulado" : "Erro na IA — usando modo simulado"; U.toast(msg, "warn"); }
+
+  async function call(task, ctx, input, schema) {
+    const a = cfg();
+    const body = { task, context: Object.assign({ operationLearningContext: learningContext() }, slim(ctx)), input: input || {}, schema: schema || null, model: a.model, temperature: a.temperature, maxTokens: a.maxTokens };
+    const r = await fetch(urlOf("/api/ai/claude"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    return await r.json();
+  }
+
+  // Tenta Claude; se falhar/indisponível, executa o fallback (mock) e marca a origem.
+  async function withClaude(task, ctx, input, mockFn) {
+    if (isReal()) {
+      try {
+        const r = await call(task, ctx, input);
+        if (r && r.success) return { source: "claude", ...r };
+        notifyErr((r && r.error) || { type: "backend_error" });
+      } catch (e) { notifyErr({ type: "backend_error", message: String(e) }); }
+    }
+    return { source: "mock", ...mockFn() };
+  }
+
+  // ---- API de alto nível (todas retornam Promise) ----
+  async function assistantReply(message, ctx) {
+    return withClaude("assistant_action", ctx, { message }, () => {
+      const m = window.Assistant.reply(message, ctx);
+      return { reply: m.text, actions: (m.actions || []).map((a) => ({ type: "assistant_op", payload: { act: a.act, label: a.label, payload: a.payload } })), learningUsed: [] };
+    });
+  }
+  async function generateScript(card, ctx) { return withClaude("generate_script", ctx, { cardId: card && card.id }, () => ({ data: { script: window.AI.generateScriptForCard(card, ctx && ctx.campaign || {}) }, reply: "Roteiro gerado (simulado).", actions: [], learningUsed: [] })); }
+  async function generateVariations(input, ctx) { return withClaude("generate_variations", ctx, input, () => ({ reply: "Variações geradas (simulado).", actions: [], learningUsed: [] })); }
+  async function generateCampaign(input, ctx) { return withClaude("generate_campaign", ctx, input, () => ({ data: { plan: window.AI.generateCampaignPlan(input) }, reply: "Campanha planejada (simulado).", actions: [], learningUsed: [] })); }
+  async function analyzeContent(card, ctx) { return withClaude("analyze_content", ctx, { cardId: card && card.id }, () => ({ data: { analysis: window.AI.analyzeUploadedVideoMock({ duration: 22 }, card) }, reply: "Análise (simulada).", actions: [], learningUsed: [] })); }
+  async function createPublicationPlan(campaign, ctx) { return withClaude("create_publication_plan", ctx, { campaignId: campaign && campaign.id }, () => { window.PublishEngine.buildPlan(campaign); return { reply: "Plano montado (simulado).", actions: [], learningUsed: [] }; }); }
+
+  // Executa actions[] que o Claude retornar (Frontend executa ação real)
+  function executeActions(actions, ctx) {
+    let done = 0;
+    (actions || []).forEach((a) => {
+      const p = a.payload || {};
+      try {
+        if (a.type === "assistant_op") { window.Assistant.exec(p.act, ctx, p.payload); done++; }
+        else if (a.type === "create_campaign") { const plan = window.AI.generateCampaignPlan(p); const id = S.actions.addCampaign(plan); window.AI.generateCardsForCampaign(S.sel.campaign(id), plan.cardPlan); done++; }
+        else if (a.type === "create_cards" && ctx.campaign) { window.AI.generateCardsForCampaign(ctx.campaign, (p.cards || [])); done++; }
+        else if (a.type === "create_variations" && ctx.campaign) { window.VariationMachine.generate(ctx.campaign, p.count || 10, { channels: p.channels, styles: p.styles }); done++; }
+        else if (a.type === "generate_script" && ctx.card) { if (p.script) S.actions.updateCard(ctx.card.id, { script: p.script }); done++; }
+        else if (a.type === "create_publication_plan" && ctx.campaign) { window.PublishEngine.buildPlan(ctx.campaign); done++; }
+        else if (a.type === "move_status" && ctx.card && p.status) { S.actions.setCardStatus(ctx.card.id, p.status); done++; }
+        else if (a.type === "save_to_library") { S.actions.addLibrary({ type: p.libType || "Aprendizado", title: p.title || "Item", content: p.content || "" }); done++; }
+      } catch (e) { /* ignora action inválida */ }
+    });
+    return done;
+  }
+
+  function lastErr() { return lastError; }
+  return { isReal, base, status, testConnection, call, withClaude, assistantReply, generateScript, generateVariations, generateCampaign, analyzeContent, createPublicationPlan, executeActions, learningContext, lastErr };
 })();
 
 </script>
