@@ -176,7 +176,7 @@ window.Views = (function () {
       <div class="flex-between wrap" style="margin-bottom:18px;gap:12px">
         <div><h1 style="font-size:24px;color:var(--text-0);font-weight:800">${esc(c.title)}</h1>
           <div class="flex gap-8 center wrap" style="margin-top:8px">${pill(c.status)}<span class="pill pill-gray">${esc(c.type)}</span><span class="muted">${esc(c.startDate)} → ${esc(c.endDate)}</span></div></div>
-        <div class="flex gap-8"><button class="btn" data-act="edit-campaign" data-id="${id}">Editar</button><button class="btn btn-primary" data-act="ai-cards" data-id="${id}">✨ Gerar cards com IA</button></div>
+        <div class="flex gap-8"><button class="btn btn-danger btn-sm" data-act="del-campaign" data-id="${id}">Excluir</button><button class="btn" data-act="edit-campaign" data-id="${id}">Editar</button><button class="btn btn-primary" data-act="ai-cards" data-id="${id}">✨ Gerar cards com IA</button></div>
       </div>
 
       <div class="grid grid-4" style="margin-bottom:18px">
@@ -215,6 +215,7 @@ window.Views = (function () {
     root.querySelectorAll("[data-nav]").forEach((el) => el.onclick = () => location.hash = "#/" + el.dataset.nav);
     root.querySelectorAll("[data-open-card]").forEach((el) => el.onclick = () => window.App.openCard(el.dataset.openCard));
     root.querySelectorAll("[data-act='edit-campaign']").forEach((el) => el.onclick = () => window.App.openCampaignForm(el.dataset.id));
+    root.querySelectorAll("[data-act='del-campaign']").forEach((el) => el.onclick = () => U.confirm("Excluir esta campanha e seus cards?", () => { S.actions.deleteCampaign(el.dataset.id); U.toast("Campanha excluída"); location.hash = "#/campanhas"; }, { danger: true, yes: "Excluir" }));
     root.querySelectorAll("[data-act='ai-cards']").forEach((el) => el.onclick = () => window.App.generateCards(el.dataset.id));
     root.querySelectorAll("[data-act='new-card']").forEach((el) => el.onclick = () => window.App.openCardForm(el.dataset.camp));
   }
@@ -232,7 +233,7 @@ window.Views = (function () {
     const st = S.get();
     const tabs = BOARD_VIEWS.map((v) => `<div class="board-tab ${v === boardView ? "active" : ""}" data-bview="${v}">${v}</div>`).join("");
     let cols;
-    if (boardView === "Produção") cols = PROD_COLS.map((s) => ({ name: s, cards: st.cards.filter((c) => c.status === s), color: statusColor(s), drop: true }));
+    if (boardView === "Produção") cols = st.statuses.map((s) => ({ name: s.name, cards: st.cards.filter((c) => c.status === s.name), color: s.color, drop: true, colmenu: true }));
     else if (boardView === "Semana") cols = WEEK_COLS.map((d, i) => ({ name: d, cards: st.cards.filter((c) => weekday(c.date) === i), color: "#3b82f6" }));
     else if (boardView === "Canal") cols = CHANNELS.map((ch) => ({ name: ch, cards: st.cards.filter((c) => c.channel === ch), color: "#a78bfa" }));
     else if (boardView === "Campanha") cols = st.campaigns.map((cp) => ({ name: cp.title, cards: S.sel.cardsByCampaign(cp.id), color: "#10b981" }));
@@ -240,24 +241,24 @@ window.Views = (function () {
 
     const colsHTML = cols.map((col) => `
       <div class="board-col">
-        <div class="board-col-head"><span class="bc-dot" style="background:${col.color}"></span><span class="bc-name">${esc(col.name)}</span><span class="bc-count">${col.cards.length}</span></div>
+        <div class="board-col-head"><span class="bc-dot" style="background:${col.color}"></span><span class="bc-name">${esc(col.name)}</span><span class="bc-count">${col.cards.length}</span>${col.colmenu ? `<span class="x-btn" data-colmenu="${esc(col.name)}" style="width:24px;height:24px;font-size:13px">⋮</span>` : ""}</div>
         <div class="board-col-body" ${col.drop ? `data-drop="${esc(col.name)}"` : ""}>
           ${col.cards.map(miniCard).join("") || `<div class="muted" style="font-size:12px;text-align:center;padding:10px">—</div>`}
         </div>
-      </div>`).join("");
+      </div>`).join("") + (boardView === "Produção" ? `<div class="board-col" style="background:transparent;border-style:dashed;min-width:180px"><div class="board-col-body"><button class="btn btn-sm btn-block" data-act="add-column">+ Coluna</button></div></div>` : "");
 
     return `
       <div class="section-title"><span class="st-ico">📋</span><h2>Board</h2><span class="st-count">${st.cards.length} cards</span>
         <div class="st-actions"><button class="btn btn-primary btn-sm" data-act="new-card">+ Novo card</button></div></div>
       <div class="board-tabs">${tabs}</div>
-      ${boardView === "Produção" ? `<p class="muted" style="margin-bottom:12px;font-size:12px">💡 Arraste os cards entre as colunas para mudar o status.</p>` : ""}
+      ${boardView === "Produção" ? `<p class="muted" style="margin-bottom:12px;font-size:12px">💡 Arraste os cards entre as colunas. Use ⋮ no card ou na coluna para mais ações.</p>` : ""}
       <div class="board">${colsHTML}</div>`;
   }
 
   function miniCard(c) {
     const camp = S.sel.campaign(c.campaignId);
     return `<div class="mini-card" draggable="true" data-card="${c.id}">
-      <div class="mc-title">${esc(c.title)}</div>
+      <div class="flex" style="align-items:flex-start;gap:6px"><div class="mc-title" style="flex:1">${esc(c.title)}</div><span class="x-btn" data-cardmenu="${c.id}" title="Ações" style="width:24px;height:24px;font-size:13px">⋮</span></div>
       <div class="mc-meta"><span class="pill pill-gray">${esc(c.type)}</span> <span class="pill ${U.prioClass(c.priority)}" style="border-color:transparent;background:transparent;padding-left:0">● ${esc(c.priority)}</span></div>
       <div class="mc-foot"><span class="avatar">${U.initials(c.responsible)}</span> ${esc(c.channel)}${camp ? " · " + esc(camp.title.slice(0, 16)) : ""}</div>
       <div class="mc-progress"><span style="width:${c.progress}%"></span></div>
@@ -281,8 +282,11 @@ window.Views = (function () {
   function bindBoard(root) {
     root.querySelectorAll("[data-bview]").forEach((el) => el.onclick = () => { boardView = el.dataset.bview; window.App.render(); });
     root.querySelectorAll("[data-act='new-card']").forEach((el) => el.onclick = () => window.App.openCardForm());
+    root.querySelectorAll("[data-act='add-column']").forEach((el) => el.onclick = () => window.App.addColumn());
+    root.querySelectorAll("[data-cardmenu]").forEach((el) => el.onclick = (e) => { e.stopPropagation(); window.App.cardMenu(el.dataset.cardmenu); });
+    root.querySelectorAll("[data-colmenu]").forEach((el) => el.onclick = (e) => { e.stopPropagation(); window.App.columnMenu(el.dataset.colmenu); });
     root.querySelectorAll("[data-card]").forEach((el) => {
-      el.addEventListener("click", (e) => { if (!el.classList.contains("dragging")) window.App.openCard(el.dataset.card); });
+      el.addEventListener("click", (e) => { if (e.target.closest("[data-cardmenu]")) return; if (!el.classList.contains("dragging")) window.App.openCard(el.dataset.card); });
       el.addEventListener("dragstart", (e) => { el.classList.add("dragging"); e.dataTransfer.setData("text/plain", el.dataset.card); });
       el.addEventListener("dragend", () => el.classList.remove("dragging"));
     });
@@ -353,22 +357,24 @@ window.Views = (function () {
     const cardsHTML = items.map((l) => `
       <div class="item-card">
         <div class="ic-top"><div class="ic-thumb">${libIco(l.type)}</div><div style="flex:1"><div class="ic-title">${esc(l.title)}</div><span class="pill pill-accent" style="margin-top:4px">${esc(l.type)}</span></div>
-          <div class="x-btn" data-dellib="${l.id}" title="Excluir">🗑️</div></div>
+          <div class="x-btn" data-libmenu="${l.id}" title="Ações">⋮</div></div>
         <div class="ic-desc">${esc(l.content)}</div>
         <div class="ic-foot">${(l.tags || []).map((t) => `<span class="pill pill-gray">#${esc(t)}</span>`).join("")}
-          <button class="btn btn-xs" data-reuse="${l.id}" style="margin-left:auto">Reutilizar</button></div>
+          <button class="btn btn-xs" data-libcopy="${l.id}" style="margin-left:auto">Copiar</button>
+          <button class="btn btn-xs btn-primary" data-reuse="${l.id}">Reutilizar</button></div>
       </div>`).join("");
     return `
       <div class="section-title"><span class="st-ico">📚</span><h2>Biblioteca</h2><span class="st-count">${st.library.length} itens reutilizáveis</span>
         <div class="st-actions"><button class="btn btn-primary btn-sm" data-act="new-lib">+ Adicionar</button></div></div>
-      <p class="muted" style="margin-bottom:14px">Ganchos, roteiros, criativos e aprendizados vencedores. A IA usa a biblioteca para sugerir novos conteúdos.</p>
+      <p class="muted" style="margin-bottom:14px">Ganchos, roteiros, CTAs, legendas, cenas de retenção, públicos, criativos e aprendizados. Reutilize em cards e campanhas — a IA também consulta a biblioteca ao gerar conteúdo.</p>
       <div class="lib-cats">${catsHTML}</div>
       <div class="grid grid-auto">${cardsHTML || emptyState("📚", "Nada nesta categoria", "")}</div>`;
   }
   function bindBiblioteca(root) {
     root.querySelectorAll("[data-libcat]").forEach((el) => el.onclick = () => { libCat = el.dataset.libcat; window.App.render(); });
-    root.querySelectorAll("[data-dellib]").forEach((el) => el.onclick = (e) => { e.stopPropagation(); U.confirm("Excluir este item da biblioteca?", () => { S.actions.deleteLibrary(el.dataset.dellib); U.toast("Item excluído"); }, { danger: true, yes: "Excluir" }); });
-    root.querySelectorAll("[data-reuse]").forEach((el) => el.onclick = () => U.simulated("Reutilizar item", "Item aplicado a um novo card de rascunho."));
+    root.querySelectorAll("[data-libmenu]").forEach((el) => el.onclick = (e) => { e.stopPropagation(); window.App.libMenu(el.dataset.libmenu); });
+    root.querySelectorAll("[data-reuse]").forEach((el) => el.onclick = () => window.App.reuseLibrary(el.dataset.reuse));
+    root.querySelectorAll("[data-libcopy]").forEach((el) => el.onclick = () => { const l = S.get().library.find((x) => x.id === el.dataset.libcopy); try { navigator.clipboard.writeText((l.title + "\n" + l.content)); } catch (e) {} U.toast("Copiado ✓"); });
     root.querySelectorAll("[data-act='new-lib']").forEach((el) => el.onclick = () => window.App.openLibForm());
   }
 
@@ -405,9 +411,28 @@ window.Views = (function () {
             <div class="k">Limites</div><div class="v">${esc(p.limits)}</div>
             <div class="k">Temas proibidos</div><div class="v">${esc(p.forbidden)}</div>
           </div></div>
+      </div>
+      <div class="info-block" style="margin-top:16px"><h4>👥 Inteligência de público</h4>
+        <p class="muted" style="margin-bottom:10px">A partir do seu público, a IA gera subpúblicos com dor, desejo, linguagem, gancho e CTA — para criar variações de vídeo por público.</p>
+        <button class="btn btn-primary btn-sm" data-act="gen-branches">✨ Gerar subpúblicos com IA</button>
+        <div id="branch-out" style="margin-top:14px"></div>
       </div>`;
   }
-  function bindPersona(root) { root.querySelectorAll("[data-act='edit-persona']").forEach((el) => el.onclick = () => window.App.openPersonaForm()); }
+  function bindPersona(root) {
+    root.querySelectorAll("[data-act='edit-persona']").forEach((el) => el.onclick = () => window.App.openPersonaForm());
+    root.querySelectorAll("[data-act='gen-branches']").forEach((el) => el.onclick = () => {
+      const branches = window.AI.generateAudienceBranches(S.get().persona.audience);
+      const out = root.querySelector("#branch-out");
+      out.innerHTML = branches.map((b, i) => `
+        <div class="scene-card">
+          <div class="scene-top"><span class="pill pill-accent">${esc(b.name)}</span><span class="pill pill-gray">${esc(b.videoType)}</span><span class="pill pill-blue">${esc(b.platform)}</span></div>
+          <div class="kv" style="margin-top:4px"><div class="k">Dor</div><div class="v">${esc(b.pain)}</div><div class="k">Desejo</div><div class="v">${esc(b.desire)}</div><div class="k">Linguagem</div><div class="v">${esc(b.language)}</div><div class="k">Gancho</div><div class="v">${esc(b.hook)}</div><div class="k">CTA</div><div class="v">${esc(b.cta)}</div></div>
+          <button class="btn btn-xs mt-16" data-savebranch="${i}">💾 Salvar na biblioteca</button>
+        </div>`).join("");
+      out.querySelectorAll("[data-savebranch]").forEach((bt) => bt.onclick = () => { const b = branches[+bt.dataset.savebranch]; S.actions.addLibrary({ type: "Públicos/subpúblicos", title: b.name, content: `Dor: ${b.pain}. Desejo: ${b.desire}. Gancho: ${b.hook}. CTA: ${b.cta}. Plataforma: ${b.platform}.`, tags: ["público"] }); U.toast("Subpúblico salvo ✓"); });
+      U.toast(branches.length + " subpúblicos gerados ✓");
+    });
+  }
 
   // ============================================================
   // CONFIGURAÇÕES

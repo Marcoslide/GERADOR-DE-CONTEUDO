@@ -1018,6 +1018,14 @@ window.Store = (function () {
       card.checklist[gi].items[ii].done = !card.checklist[gi].items[ii].done;
       card.progress = sel.cardProgress(card);
     }),
+    chkAddItem: (cardId, gi, text) => update((s) => { const c = s.cards.find((x) => x.id === cardId); c.checklist[gi].items.push({ t: text, done: false }); c.progress = sel.cardProgress(c); }),
+    chkDelItem: (cardId, gi, ii) => update((s) => { const c = s.cards.find((x) => x.id === cardId); c.checklist[gi].items.splice(ii, 1); c.progress = sel.cardProgress(c); }),
+    chkEditItem: (cardId, gi, ii, text) => update((s) => { s.cards.find((x) => x.id === cardId).checklist[gi].items[ii].t = text; }),
+    chkAddGroup: (cardId, name) => update((s) => { s.cards.find((x) => x.id === cardId).checklist.push({ group: name, items: [] }); }),
+    chkDelGroup: (cardId, gi) => update((s) => { const c = s.cards.find((x) => x.id === cardId); c.checklist.splice(gi, 1); c.progress = sel.cardProgress(c); }),
+    chkRenameGroup: (cardId, gi, name) => update((s) => { s.cards.find((x) => x.id === cardId).checklist[gi].group = name; }),
+    setChecklist: (cardId, checklist) => update((s) => { const c = s.cards.find((x) => x.id === cardId); c.checklist = checklist; c.progress = sel.cardProgress(c); }),
+    duplicateCard: (id) => { let nid; update((s) => { const c = s.cards.find((x) => x.id === id); const copy = JSON.parse(JSON.stringify(c)); nid = uid("card"); copy.id = nid; copy.title = c.title + " (cópia)"; copy.video = { original: null, versions: [], retention: null, chosenVersionId: null }; copy.corrections = []; copy.analysis = { metrics: {}, done: false }; copy.createdAt = today(); s.cards.unshift(copy); }); return nid; },
     addCorrection: (cardId, data) => update((s) => {
       const card = s.cards.find((c) => c.id === cardId);
       card.corrections.unshift(Object.assign({ id: uid("cor"), status: "Aberta", createdAt: today() }, data));
@@ -1029,6 +1037,7 @@ window.Store = (function () {
     addFile: (cardId, data) => update((s) => { s.cards.find((c) => c.id === cardId).files.unshift(data); }),
 
     addLibrary: (data) => update((s) => { s.library.unshift(Object.assign({ id: uid("lib"), tags: [], source: "", createdAt: today() }, data)); }),
+    updateLibrary: (id, patch) => update((s) => { Object.assign(s.library.find((l) => l.id === id), patch); }),
     deleteLibrary: (id) => update((s) => { s.library = s.library.filter((l) => l.id !== id); }),
 
     updatePersona: (patch) => update((s) => { Object.assign(s.persona, patch); }),
@@ -1046,7 +1055,16 @@ window.Store = (function () {
     }),
 
     addStatus: (name, color) => update((s) => { s.statuses.push({ name, color }); }),
-    deleteStatus: (name) => update((s) => { s.statuses = s.statuses.filter((x) => x.name !== name); }),
+    deleteStatus: (name) => update((s) => {
+      const fallback = (s.statuses.find((x) => x.name !== name) || { name: "Ideia" }).name;
+      s.cards.forEach((c) => { if (c.status === name) c.status = fallback; });
+      s.statuses = s.statuses.filter((x) => x.name !== name);
+    }),
+    renameStatus: (oldName, newName, color) => update((s) => {
+      const st = s.statuses.find((x) => x.name === oldName); if (!st) return;
+      if (newName) { s.cards.forEach((c) => { if (c.status === oldName) c.status = newName; }); st.name = newName; }
+      if (color) st.color = color;
+    }),
     reset,
   };
 
@@ -1056,6 +1074,323 @@ window.Store = (function () {
   function cloneChecklist() { return JSON.parse(JSON.stringify(window.SEED.cards[0].checklist)).map((g) => ({ group: g.group, items: g.items.map((i) => ({ t: i.t, done: false })) })); }
 
   return { load, get, subscribe, emit, update, sel, actions, uid, reset, persist };
+})();
+
+</script>
+  <script>
+/* ============================================================
+   VIRALIZA — Camada de IA (simulada, mas funcional)
+   Gera dados REAIS no estado do app. Pronta para trocar por
+   API real (OpenAI/Claude) mantendo as mesmas assinaturas.
+   Regra: pouca entrada, muita saída.
+   ============================================================ */
+window.AI = (function () {
+  const S = window.Store;
+  const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
+  const cap = (s) => (s || "").charAt(0).toUpperCase() + (s || "").slice(1);
+
+  // ------------------------------------------------------------
+  // Planos de card por objetivo
+  // ------------------------------------------------------------
+  const PLAN_PRODUTO = [
+    { type: "Dor e Solução", title: "Vídeo 1 — Dor e Solução" },
+    { type: "Antes e depois", title: "Vídeo 2 — Antes e Depois" },
+    { type: "Demonstração", title: "Vídeo 3 — Demonstração" },
+    { type: "Prova social", title: "Vídeo 4 — Prova Social" },
+    { type: "Stories de venda", title: "Stories — Sequência de Venda" },
+    { type: "UGC", title: "Criativo IA — Foto do Produto" },
+    { type: "Oferta", title: "Vídeo 5 — Oferta com Urgência" },
+    { type: "Review", title: "Vídeo 6 — Review honesto" },
+  ];
+  const PLAN_AFILIADO = [
+    { type: "Dor e Solução", title: "Vídeo 1 — Problema do público" },
+    { type: "Review", title: "Vídeo 2 — Review do produto" },
+    { type: "Comparação", title: "Vídeo 3 — Comparação" },
+    { type: "Resposta a objeção", title: "Vídeo 4 — Resposta a objeção" },
+    { type: "Stories de venda", title: "Stories — Link de compra" },
+    { type: "Oferta", title: "Criativo IA — Oferta rápida" },
+    { type: "Prova social", title: "Vídeo 5 — Prova social" },
+  ];
+
+  const QTY = { "1 vídeo": 1, "3 vídeos": 3, "5 vídeos": 5, "7 dias de conteúdo": 7, "10 variações": 10 };
+
+  // ------------------------------------------------------------
+  // generateCampaignPlan(input)
+  // input: { text, goal, channels[], style, material[], quantity, audience }
+  // ------------------------------------------------------------
+  function generateCampaignPlan(input) {
+    input = input || {};
+    const text = (input.text || "").trim();
+    const goal = input.goal || "Vender produto";
+    const isAff = /afiliad/i.test(goal) || (input.material || []).some((m) => /afiliad/i.test(m));
+    const type = isAff ? "Afiliado" : /marketplace/i.test(goal) ? "Marketplace" : /live/i.test(goal) ? "Live Shop" : /org[âa]nico/i.test(goal) ? "Conteúdo orgânico" : "Produto físico";
+    const product = extractProduct(text) || "seu produto";
+    const style = input.style || "Direto e vendedor";
+    const channels = (input.channels && input.channels.length) ? input.channels : ["Instagram", "TikTok"];
+    const qtd = QTY[input.quantity] || 3;
+    const audience = input.audience || guessAudience(text) || "pessoas interessadas no produto";
+
+    const promise = makePromise(product, style);
+    const cta = isAff ? "Compra pelo link da bio" : "Garanta pelo link da bio";
+    const emotion = pick(["Alívio", "Desejo", "Urgência", "Curiosidade", "Confiança", "Satisfação"]);
+    const basePlan = isAff ? PLAN_AFILIADO : PLAN_PRODUTO;
+    let cardPlan;
+    if (input.quantity === "7 dias de conteúdo") cardPlan = sevenDays(basePlan);
+    else if (input.quantity === "10 variações") cardPlan = tenVariations(basePlan);
+    else cardPlan = basePlan.slice(0, Math.max(1, qtd));
+
+    return {
+      title: (isAff ? "Afiliado — " : "") + cap(product), type, objective: isAff ? "Gerar vendas pelo link de afiliado" : "Gerar vendas do produto",
+      productName: cap(product), offer: makeOffer(product), audience, promise, emotion, cta,
+      channels, style, videoCount: cardPlan.length, materials: input.material || [], cardPlan,
+      summary: `Campanha de ${type.toLowerCase()} para ${product}, estilo "${style}", em ${channels.join(", ")}.`,
+    };
+  }
+
+  function extractProduct(text) {
+    if (!text) return null;
+    // pega o que vem depois de "vender/vendo/produto", ignorando artigos, até uma preposição de contexto
+    const m = text.match(/(?:vender|vendo|divulgar|promover|produto[:\s])\s+(?:um |uma |o |a |meu |minha |uns |umas )?([a-zà-ú][\wà-ú]*(?:\s+[a-zà-ú][\wà-ú]*){0,4}?)(?=\s+(?:usando|com|para|no|na|nos|nas|em|pelo|pela|via|através|e\s)|[.,!?]|$)/i);
+    let p = m ? m[1] : text.split(/\s+/).slice(0, 4).join(" ");
+    p = p.replace(/^(um|uma|o|a|meu|minha)\s+/i, "").replace(/\b(usando|com|para|no|na|em|de vídeos?)\b.*$/i, "").trim();
+    return p || null;
+  }
+  function guessAudience(text) {
+    if (/m[ãa]e|casa|cozinha|organiza/i.test(text)) return "mães e donas de casa que querem praticidade";
+    if (/academia|fitness|treino/i.test(text)) return "pessoas que treinam e cuidam do corpo";
+    if (/jovem|jovens|estudante/i.test(text)) return "jovens de 15 a 24 anos";
+    return null;
+  }
+  function makePromise(product, style) {
+    if (/organiza|pote|cozinha|casa/i.test(product)) return "Organize em minutos, sem gastar uma fortuna";
+    if (/quadro|decor/i.test(product)) return "Transforme seu ambiente em minutos";
+    return `Resolva de vez com ${product}`;
+  }
+  function makeOffer(product) { return `${cap(product)} com condição especial e frete grátis`; }
+  function sevenDays(base) { const out = []; for (let i = 0; i < 7; i++) { const b = base[i % base.length]; out.push({ type: b.type, title: `Dia ${i + 1} — ${b.type}` }); } return out; }
+  function tenVariations(base) { const out = []; for (let i = 0; i < 10; i++) { const b = base[i % base.length]; out.push({ type: b.type, title: `Variação ${i + 1} — ${b.type}` }); } return out; }
+
+  // ------------------------------------------------------------
+  // generateCardsForCampaign(campaign) → cria cards no estado
+  // ------------------------------------------------------------
+  function generateCardsForCampaign(campaign, plan) {
+    const cards = (plan || campaign.cardPlan || []);
+    const ids = [];
+    cards.forEach((cp, i) => {
+      const draft = { title: cp.title, type: cp.type, campaignId: campaign.id, channel: (campaign.channels && campaign.channels[i % campaign.channels.length]) || "Instagram", status: "Pronto para gravar", priority: i === 0 ? "Alta" : "Média", objective: campaign.objective, nextAction: "Gravar o gancho" };
+      // gera conteúdo do card
+      const tmp = Object.assign({ script: {}, strategy: {}, visual: {} }, draft);
+      draft.strategy = generateStrategyForCard(tmp, campaign);
+      draft.script = generateScriptForCard(tmp, campaign);
+      draft.visual = generateVisualDirection(tmp, campaign);
+      draft.checklist = generateChecklistForCard(tmp, campaign);
+      draft.methods = [cp.type];
+      const id = S.actions.addCard(draft);
+      ids.push(id);
+    });
+    return ids;
+  }
+
+  // ------------------------------------------------------------
+  // generateStrategyForCard
+  // ------------------------------------------------------------
+  function generateStrategyForCard(card, campaign) {
+    const angle = card.type || "Dor e Solução";
+    return {
+      objective: campaign.objective || "Gerar vendas pelo link",
+      angle, audience: campaign.audience || "público comprador",
+      pain: painFor(campaign.productName), desire: "praticidade e resultado",
+      promise: campaign.promise || "Resolva de vez", emotion: campaign.emotion || "Alívio",
+      offer: campaign.offer || "", cta: campaign.cta || "Link na bio",
+      method: angle, channel: card.channel,
+      realMethod: `R — gancho de ${angle.toLowerCase()}; E — ${(campaign.emotion || "alívio").toLowerCase()}; A — demonstração real; L — série do produto`,
+    };
+  }
+  function painFor(product) {
+    if (/pote|organiza|cozinha/i.test(product || "")) return "perde tempo e vive na bagunça";
+    if (/quadro|decor/i.test(product || "")) return "ambiente sem graça e vazio";
+    return "não conseguiu resolver com outras soluções";
+  }
+
+  // ------------------------------------------------------------
+  // generateScriptForCard(card, campaign)
+  // ------------------------------------------------------------
+  const HOOKS = {
+    "Dor e Solução": ["Você perde tempo TODO dia por causa disso 👇", "Se você sofre com {dor}, esse vídeo é pra você.", "Parei de {dor} com esse truque simples."],
+    "Antes e depois": ["Olha o ANTES... agora o DEPOIS 😱", "Ninguém acredita que é o mesmo lugar.", "A transformação que você precisa ver."],
+    "Demonstração": ["Bora testar AGORA na sua frente 🧪", "Será que funciona mesmo? Olha isso.", "Testando ao vivo pra você decidir."],
+    "Prova social": ["Mais de 5 mil pessoas já testaram 👇", "Não sou só eu falando, olha os comentários.", "Todo mundo tá comprando por causa disso."],
+    "Review": ["Testei por 30 dias, olha a verdade 👇", "Review SEM filtro do produto que tá bombando.", "Vale a pena? A verdade ninguém conta."],
+    "Comparação": ["Comum x melhor: olha a diferença ⚖️", "Antes de comprar, assista essa comparação.", "Um é bom, o outro muda tudo."],
+    "Resposta a objeção": ['"{obj}" — vou provar que dá certo 🛡️', "A dúvida que todo mundo tem, respondida.", "Você acha que não funciona? Olha."],
+    "Oferta": ["Só hoje: {oferta} 🏷️", "Corre que é por tempo limitado ⏰", "Preço que não vai durar."],
+    "Stories de venda": ["Arrasta pra cima e garante o seu 👆", "Últimas unidades com desconto.", "O link tá aqui, corre!"],
+    "UGC": ["Comprei e preciso te contar 👇", "Recebido que virou meu favorito.", "Testei sem esperar nada e olha."],
+  };
+
+  function generateScriptForCard(card, campaign) {
+    const angle = card.type || "Dor e Solução";
+    const product = (campaign && campaign.productName) || "o produto";
+    const dor = (card.strategy && card.strategy.pain) || painFor(product);
+    const cta = (campaign && campaign.cta) || "Compra pelo link da bio";
+    const oferta = (campaign && campaign.offer) || "condição especial";
+    const obj = "será que funciona mesmo?";
+    const hooks = (HOOKS[angle] || HOOKS["Dor e Solução"]).map((h) => h.replace("{dor}", dor).replace("{obj}", obj).replace("{oferta}", oferta));
+    const retention = { start: "00:14", end: "00:19", type: pick(["Resultado visual", "Transformação", "Reação", "Momento de virada"]), reason: "Cena de maior impacto — ótima para abrir o vídeo e prender atenção.", screenText: "Olha o que aconteceu no final…" };
+    return {
+      hook: hooks[0], hookAlt1: hooks[1] || "", hookAlt2: hooks[2] || "",
+      opening: `Mostrar ${/pote|organiza|cozinha/i.test(product) ? "a bagunça (0–3s, sem falar)" : "o problema/contexto (0–3s)"}.`,
+      mainLine: `${cap(product)} resolve ${dor}. Eu testei e o resultado foi ${pick(["surpreendente", "imediato", "melhor do que esperava"])}: ${(campaign && campaign.promise) || "resolve de vez"}.`,
+      scenes: ["Problema/contexto", "Produto entrando em cena", "Demonstração de uso", "Resultado", "Close do CTA"],
+      screenText: [dor.toUpperCase(), (campaign && campaign.offer) ? "OFERTA ESPECIAL" : "MUDOU TUDO", "Link na bio 👆"],
+      cutPhrases: ["Ninguém te conta isso", "Mudou minha rotina", "Testa e me conta"],
+      cta, caption: `${hooks[0].replace(/[👇🔥😱]/g, "").trim()} ${product ? "" : ""}✨ ${cta} #viraliza`,
+      hashtags: hashtagsFor(product, campaign), title: `${angle} — ${product}`, cover: `${cap(product)} com texto "${dor}"`,
+      stories: `1) Enquete: "Você também sofre com ${dor}?" 2) Mostrar produto 3) Link "${cta}"`,
+      retention,
+    };
+  }
+  function hashtagsFor(product, campaign) {
+    const base = ["#viraliza", "#dicas"];
+    if (/pote|organiza|cozinha|casa/i.test(product || "")) base.push("#organização", "#cozinha", "#donadecasa");
+    else if (/quadro|decor/i.test(product || "")) base.push("#decoração", "#casa", "#quadros");
+    else base.push("#" + (product || "produto").split(/\s+/)[0].toLowerCase().replace(/[^a-z0-9]/g, ""));
+    if (campaign && campaign.type === "Afiliado") base.push("#achadinhos");
+    return base.join(" ");
+  }
+
+  // ------------------------------------------------------------
+  // generateStoriesForCard
+  // ------------------------------------------------------------
+  function generateStoriesForCard(card, campaign) {
+    const cta = (campaign && campaign.cta) || "Link na bio";
+    return [
+      `Story 1 — Enquete: "Você tem esse problema?" (gera engajamento)`,
+      `Story 2 — Mostrar o produto em uso (prova real)`,
+      `Story 3 — Depoimento/print de resultado`,
+      `Story 4 — CTA com link: "${cta}"`,
+    ];
+  }
+
+  // ------------------------------------------------------------
+  // generateChecklistForCard
+  // ------------------------------------------------------------
+  function generateChecklistForCard(card, campaign) {
+    return [
+      { group: "Preparação", items: [{ t: "Separar o produto", done: false }, { t: "Revisar o roteiro/gancho", done: false }, { t: "Preparar cenário e luz", done: false }] },
+      { group: "Gravação", items: [{ t: "Gravar 3 ganchos diferentes", done: false }, { t: "Gravar fala principal", done: false }, { t: "Gravar close do produto", done: false }, { t: "Gravar CTA", done: false }] },
+      { group: "Edição", items: [{ t: "Cortar início fraco", done: false }, { t: "Inserir texto na tela", done: false }, { t: "Colocar legenda", done: false }] },
+      { group: "Publicação", items: [{ t: "Revisar legenda e hashtags", done: false }, { t: "Publicar no canal", done: false }, { t: "Salvar link", done: false }] },
+      { group: "Análise", items: [{ t: "Inserir métricas", done: false }, { t: "Avaliar retenção e CTA", done: false }] },
+      { group: "Correção", items: [{ t: "Definir o que melhorar", done: false }, { t: "Criar variação/regravação", done: false }] },
+    ];
+  }
+
+  // ------------------------------------------------------------
+  // generateVisualDirection(card, campaign) — "Visual do vídeo"
+  // ------------------------------------------------------------
+  function generateVisualDirection(card, campaign) {
+    const vendedor = /vendedor|urg|oferta/i.test((campaign && campaign.style) || "");
+    return {
+      roupa: pick(["camiseta clara ou neutra", "look casual e limpo", "camisa lisa sem estampa forte"]),
+      cor: pick(["cores neutras (branco, bege, cinza)", "tons claros", "sem estampas chamativas"]),
+      ambiente: pick(["sala real com parede vazia", "ambiente organizado e limpo", "cozinha/estante real ao fundo"]),
+      enquadramento: "vertical 9:16, meio corpo, produto visível nos 2 primeiros segundos",
+      iluminacao: pick(["luz natural de janela", "luz frontal suave, sem sombra no rosto", "ring light frontal"]),
+      objetos: pick(["produto em mãos", "produto aplicado no ambiente", "produto + item do dia a dia para escala"]),
+      momentoProduto: "produto aparece nos 2 primeiros segundos e reaparece no CTA",
+      estilo: (campaign && campaign.style) || "natural e próximo",
+      energia: vendedor ? "direto, próximo e vendedor" : pick(["próximo e natural", "empolgado e leve", "confiante e claro"]),
+    };
+  }
+
+  // ------------------------------------------------------------
+  // generateVideoCreativeMock(card, options)
+  // ------------------------------------------------------------
+  function generateVideoCreativeMock(card, options) {
+    options = options || {};
+    return {
+      type: "Vídeo IA", source: "IA (foto do produto)", template: options.template || "Zoom lento no produto",
+      status: "Gerado", creditsUsed: options.cost || 12, prompt: options.prompt || `${card.type} de ${(card.title || "produto")}, luz natural, vertical`,
+      fileName: "video-ia-" + (card.id || "").slice(-4) + ".mp4", note: "Vídeo IA gerado em modo simulado. Estrutura pronta para API real.",
+    };
+  }
+
+  // ------------------------------------------------------------
+  // analyzeUploadedVideoMock(video, card)
+  // ------------------------------------------------------------
+  function analyzeUploadedVideoMock(video, card) {
+    const dur = (video && video.duration) || 25;
+    return {
+      score: (6.8 + Math.random() * 2).toFixed(1),
+      retention: { start: Math.round(dur * 0.7), end: Math.round(dur * 0.7) + 5, type: "Resultado visual", reason: "Cena de maior impacto — ideal para abrir." },
+      problems: ["Produto aparece tarde", "CTA fraco no final"],
+      strengths: ["Gancho bem construído", "Boa clareza"],
+      suggestions: ["Mostrar produto nos 2 primeiros segundos", "Repetir CTA no meio"],
+    };
+  }
+
+  // ------------------------------------------------------------
+  // generateCorrectionFromAnalysis(card, analysis)
+  // ------------------------------------------------------------
+  function generateCorrectionFromAnalysis(card, analysis) {
+    const s = card.script || {};
+    const reasons = ["Produto apareceu tarde", "CTA fraco", "Gancho fraco", "Baixa retenção"];
+    const reason = (analysis && analysis.problems && analysis.problems[0]) || pick(reasons);
+    return {
+      reason,
+      diagnosis: `A IA identificou: ${reason.toLowerCase()}. Isso reduz retenção e conversão.`,
+      correctedScript: {
+        hook: "PARA TUDO 🔥 " + (s.hook || "olha isso") ,
+        opening: "Produto em close nos primeiros 2 segundos.",
+        cta: "Toca no link AGORA e garante o seu. 🛒",
+        screenText: "Não role antes de ver isso 👀",
+      },
+      structure: "Cena forte → contexto → explicação → resultado → CTA",
+    };
+  }
+
+  // ------------------------------------------------------------
+  // generateAudienceBranches(audience)
+  // ------------------------------------------------------------
+  const BRANCH_LIB = {
+    jovens: ["jovens gamers", "jovens do futebol", "jovens de academia", "jovens que gostam de moda", "jovens que querem ganhar dinheiro", "jovens estudantes", "jovens de humor/memes", "jovens que seguem influenciadores"],
+    "mães": ["mães de primeira viagem", "mães que trabalham fora", "mães organizadas", "mães que economizam", "mães donas de casa"],
+    casa: ["quem mora sozinho", "recém-casados", "quem reformou a casa", "quem aluga e não pode furar parede", "quem ama decorar"],
+    fitness: ["iniciantes na academia", "quem treina em casa", "quem quer emagrecer", "quem foca em ganho de massa", "corredores"],
+    default: ["curiosos que comparam preço", "quem já quase comprou e desistiu", "indicação de amigos", "quem busca praticidade", "quem compra por impulso", "quem pesquisa muito antes"],
+  };
+  function branchKey(a) {
+    a = (a || "").toLowerCase();
+    if (/jovem|jovens|adolesc/.test(a)) return "jovens";
+    if (/m[ãa]e/.test(a)) return "mães";
+    if (/casa|cozinha|decor|organiza/.test(a)) return "casa";
+    if (/academia|fitness|treino|corpo/.test(a)) return "fitness";
+    return "default";
+  }
+  function generateAudienceBranches(audience) {
+    const names = BRANCH_LIB[branchKey(audience)] || BRANCH_LIB.default;
+    const platforms = ["TikTok", "Instagram", "YouTube Shorts", "Facebook"];
+    const angles = ["Dor e Solução", "Review", "Antes e depois", "Prova social", "Comparação", "Demonstração"];
+    return names.slice(0, 8).map((name, i) => ({
+      name,
+      pain: `${cap(name)} sofrem com falta de tempo/solução prática`,
+      desire: pick(["resultado rápido", "economizar", "praticidade", "se sentir parte do grupo", "resolver de vez"]),
+      language: pick(["direta e popular", "descontraída com gírias", "próxima e acolhedora", "empolgada"]),
+      visual: pick(["UGC natural", "antes e depois", "demonstração real", "bastidor"]),
+      videoType: angles[i % angles.length],
+      hook: pick(HOOKS[angles[i % angles.length]] || HOOKS["Dor e Solução"]).replace("{dor}", "isso").replace("{obj}", "funciona?").replace("{oferta}", "oferta"),
+      cta: pick(["Link na bio", "Arrasta pra cima", "Comenta EU QUERO", "Chama no direct"]),
+      platform: platforms[i % platforms.length],
+    }));
+  }
+
+  return {
+    generateCampaignPlan, generateCardsForCampaign, generateStrategyForCard, generateScriptForCard,
+    generateStoriesForCard, generateChecklistForCard, generateVisualDirection, generateVideoCreativeMock,
+    analyzeUploadedVideoMock, generateCorrectionFromAnalysis, generateAudienceBranches,
+    QTY,
+  };
 })();
 
 </script>
@@ -1437,7 +1772,7 @@ window.Views = (function () {
       <div class="flex-between wrap" style="margin-bottom:18px;gap:12px">
         <div><h1 style="font-size:24px;color:var(--text-0);font-weight:800">${esc(c.title)}</h1>
           <div class="flex gap-8 center wrap" style="margin-top:8px">${pill(c.status)}<span class="pill pill-gray">${esc(c.type)}</span><span class="muted">${esc(c.startDate)} → ${esc(c.endDate)}</span></div></div>
-        <div class="flex gap-8"><button class="btn" data-act="edit-campaign" data-id="${id}">Editar</button><button class="btn btn-primary" data-act="ai-cards" data-id="${id}">✨ Gerar cards com IA</button></div>
+        <div class="flex gap-8"><button class="btn btn-danger btn-sm" data-act="del-campaign" data-id="${id}">Excluir</button><button class="btn" data-act="edit-campaign" data-id="${id}">Editar</button><button class="btn btn-primary" data-act="ai-cards" data-id="${id}">✨ Gerar cards com IA</button></div>
       </div>
 
       <div class="grid grid-4" style="margin-bottom:18px">
@@ -1476,6 +1811,7 @@ window.Views = (function () {
     root.querySelectorAll("[data-nav]").forEach((el) => el.onclick = () => location.hash = "#/" + el.dataset.nav);
     root.querySelectorAll("[data-open-card]").forEach((el) => el.onclick = () => window.App.openCard(el.dataset.openCard));
     root.querySelectorAll("[data-act='edit-campaign']").forEach((el) => el.onclick = () => window.App.openCampaignForm(el.dataset.id));
+    root.querySelectorAll("[data-act='del-campaign']").forEach((el) => el.onclick = () => U.confirm("Excluir esta campanha e seus cards?", () => { S.actions.deleteCampaign(el.dataset.id); U.toast("Campanha excluída"); location.hash = "#/campanhas"; }, { danger: true, yes: "Excluir" }));
     root.querySelectorAll("[data-act='ai-cards']").forEach((el) => el.onclick = () => window.App.generateCards(el.dataset.id));
     root.querySelectorAll("[data-act='new-card']").forEach((el) => el.onclick = () => window.App.openCardForm(el.dataset.camp));
   }
@@ -1493,7 +1829,7 @@ window.Views = (function () {
     const st = S.get();
     const tabs = BOARD_VIEWS.map((v) => `<div class="board-tab ${v === boardView ? "active" : ""}" data-bview="${v}">${v}</div>`).join("");
     let cols;
-    if (boardView === "Produção") cols = PROD_COLS.map((s) => ({ name: s, cards: st.cards.filter((c) => c.status === s), color: statusColor(s), drop: true }));
+    if (boardView === "Produção") cols = st.statuses.map((s) => ({ name: s.name, cards: st.cards.filter((c) => c.status === s.name), color: s.color, drop: true, colmenu: true }));
     else if (boardView === "Semana") cols = WEEK_COLS.map((d, i) => ({ name: d, cards: st.cards.filter((c) => weekday(c.date) === i), color: "#3b82f6" }));
     else if (boardView === "Canal") cols = CHANNELS.map((ch) => ({ name: ch, cards: st.cards.filter((c) => c.channel === ch), color: "#a78bfa" }));
     else if (boardView === "Campanha") cols = st.campaigns.map((cp) => ({ name: cp.title, cards: S.sel.cardsByCampaign(cp.id), color: "#10b981" }));
@@ -1501,24 +1837,24 @@ window.Views = (function () {
 
     const colsHTML = cols.map((col) => `
       <div class="board-col">
-        <div class="board-col-head"><span class="bc-dot" style="background:${col.color}"></span><span class="bc-name">${esc(col.name)}</span><span class="bc-count">${col.cards.length}</span></div>
+        <div class="board-col-head"><span class="bc-dot" style="background:${col.color}"></span><span class="bc-name">${esc(col.name)}</span><span class="bc-count">${col.cards.length}</span>${col.colmenu ? `<span class="x-btn" data-colmenu="${esc(col.name)}" style="width:24px;height:24px;font-size:13px">⋮</span>` : ""}</div>
         <div class="board-col-body" ${col.drop ? `data-drop="${esc(col.name)}"` : ""}>
           ${col.cards.map(miniCard).join("") || `<div class="muted" style="font-size:12px;text-align:center;padding:10px">—</div>`}
         </div>
-      </div>`).join("");
+      </div>`).join("") + (boardView === "Produção" ? `<div class="board-col" style="background:transparent;border-style:dashed;min-width:180px"><div class="board-col-body"><button class="btn btn-sm btn-block" data-act="add-column">+ Coluna</button></div></div>` : "");
 
     return `
       <div class="section-title"><span class="st-ico">📋</span><h2>Board</h2><span class="st-count">${st.cards.length} cards</span>
         <div class="st-actions"><button class="btn btn-primary btn-sm" data-act="new-card">+ Novo card</button></div></div>
       <div class="board-tabs">${tabs}</div>
-      ${boardView === "Produção" ? `<p class="muted" style="margin-bottom:12px;font-size:12px">💡 Arraste os cards entre as colunas para mudar o status.</p>` : ""}
+      ${boardView === "Produção" ? `<p class="muted" style="margin-bottom:12px;font-size:12px">💡 Arraste os cards entre as colunas. Use ⋮ no card ou na coluna para mais ações.</p>` : ""}
       <div class="board">${colsHTML}</div>`;
   }
 
   function miniCard(c) {
     const camp = S.sel.campaign(c.campaignId);
     return `<div class="mini-card" draggable="true" data-card="${c.id}">
-      <div class="mc-title">${esc(c.title)}</div>
+      <div class="flex" style="align-items:flex-start;gap:6px"><div class="mc-title" style="flex:1">${esc(c.title)}</div><span class="x-btn" data-cardmenu="${c.id}" title="Ações" style="width:24px;height:24px;font-size:13px">⋮</span></div>
       <div class="mc-meta"><span class="pill pill-gray">${esc(c.type)}</span> <span class="pill ${U.prioClass(c.priority)}" style="border-color:transparent;background:transparent;padding-left:0">● ${esc(c.priority)}</span></div>
       <div class="mc-foot"><span class="avatar">${U.initials(c.responsible)}</span> ${esc(c.channel)}${camp ? " · " + esc(camp.title.slice(0, 16)) : ""}</div>
       <div class="mc-progress"><span style="width:${c.progress}%"></span></div>
@@ -1542,8 +1878,11 @@ window.Views = (function () {
   function bindBoard(root) {
     root.querySelectorAll("[data-bview]").forEach((el) => el.onclick = () => { boardView = el.dataset.bview; window.App.render(); });
     root.querySelectorAll("[data-act='new-card']").forEach((el) => el.onclick = () => window.App.openCardForm());
+    root.querySelectorAll("[data-act='add-column']").forEach((el) => el.onclick = () => window.App.addColumn());
+    root.querySelectorAll("[data-cardmenu]").forEach((el) => el.onclick = (e) => { e.stopPropagation(); window.App.cardMenu(el.dataset.cardmenu); });
+    root.querySelectorAll("[data-colmenu]").forEach((el) => el.onclick = (e) => { e.stopPropagation(); window.App.columnMenu(el.dataset.colmenu); });
     root.querySelectorAll("[data-card]").forEach((el) => {
-      el.addEventListener("click", (e) => { if (!el.classList.contains("dragging")) window.App.openCard(el.dataset.card); });
+      el.addEventListener("click", (e) => { if (e.target.closest("[data-cardmenu]")) return; if (!el.classList.contains("dragging")) window.App.openCard(el.dataset.card); });
       el.addEventListener("dragstart", (e) => { el.classList.add("dragging"); e.dataTransfer.setData("text/plain", el.dataset.card); });
       el.addEventListener("dragend", () => el.classList.remove("dragging"));
     });
@@ -1614,22 +1953,24 @@ window.Views = (function () {
     const cardsHTML = items.map((l) => `
       <div class="item-card">
         <div class="ic-top"><div class="ic-thumb">${libIco(l.type)}</div><div style="flex:1"><div class="ic-title">${esc(l.title)}</div><span class="pill pill-accent" style="margin-top:4px">${esc(l.type)}</span></div>
-          <div class="x-btn" data-dellib="${l.id}" title="Excluir">🗑️</div></div>
+          <div class="x-btn" data-libmenu="${l.id}" title="Ações">⋮</div></div>
         <div class="ic-desc">${esc(l.content)}</div>
         <div class="ic-foot">${(l.tags || []).map((t) => `<span class="pill pill-gray">#${esc(t)}</span>`).join("")}
-          <button class="btn btn-xs" data-reuse="${l.id}" style="margin-left:auto">Reutilizar</button></div>
+          <button class="btn btn-xs" data-libcopy="${l.id}" style="margin-left:auto">Copiar</button>
+          <button class="btn btn-xs btn-primary" data-reuse="${l.id}">Reutilizar</button></div>
       </div>`).join("");
     return `
       <div class="section-title"><span class="st-ico">📚</span><h2>Biblioteca</h2><span class="st-count">${st.library.length} itens reutilizáveis</span>
         <div class="st-actions"><button class="btn btn-primary btn-sm" data-act="new-lib">+ Adicionar</button></div></div>
-      <p class="muted" style="margin-bottom:14px">Ganchos, roteiros, criativos e aprendizados vencedores. A IA usa a biblioteca para sugerir novos conteúdos.</p>
+      <p class="muted" style="margin-bottom:14px">Ganchos, roteiros, CTAs, legendas, cenas de retenção, públicos, criativos e aprendizados. Reutilize em cards e campanhas — a IA também consulta a biblioteca ao gerar conteúdo.</p>
       <div class="lib-cats">${catsHTML}</div>
       <div class="grid grid-auto">${cardsHTML || emptyState("📚", "Nada nesta categoria", "")}</div>`;
   }
   function bindBiblioteca(root) {
     root.querySelectorAll("[data-libcat]").forEach((el) => el.onclick = () => { libCat = el.dataset.libcat; window.App.render(); });
-    root.querySelectorAll("[data-dellib]").forEach((el) => el.onclick = (e) => { e.stopPropagation(); U.confirm("Excluir este item da biblioteca?", () => { S.actions.deleteLibrary(el.dataset.dellib); U.toast("Item excluído"); }, { danger: true, yes: "Excluir" }); });
-    root.querySelectorAll("[data-reuse]").forEach((el) => el.onclick = () => U.simulated("Reutilizar item", "Item aplicado a um novo card de rascunho."));
+    root.querySelectorAll("[data-libmenu]").forEach((el) => el.onclick = (e) => { e.stopPropagation(); window.App.libMenu(el.dataset.libmenu); });
+    root.querySelectorAll("[data-reuse]").forEach((el) => el.onclick = () => window.App.reuseLibrary(el.dataset.reuse));
+    root.querySelectorAll("[data-libcopy]").forEach((el) => el.onclick = () => { const l = S.get().library.find((x) => x.id === el.dataset.libcopy); try { navigator.clipboard.writeText((l.title + "\n" + l.content)); } catch (e) {} U.toast("Copiado ✓"); });
     root.querySelectorAll("[data-act='new-lib']").forEach((el) => el.onclick = () => window.App.openLibForm());
   }
 
@@ -1666,9 +2007,28 @@ window.Views = (function () {
             <div class="k">Limites</div><div class="v">${esc(p.limits)}</div>
             <div class="k">Temas proibidos</div><div class="v">${esc(p.forbidden)}</div>
           </div></div>
+      </div>
+      <div class="info-block" style="margin-top:16px"><h4>👥 Inteligência de público</h4>
+        <p class="muted" style="margin-bottom:10px">A partir do seu público, a IA gera subpúblicos com dor, desejo, linguagem, gancho e CTA — para criar variações de vídeo por público.</p>
+        <button class="btn btn-primary btn-sm" data-act="gen-branches">✨ Gerar subpúblicos com IA</button>
+        <div id="branch-out" style="margin-top:14px"></div>
       </div>`;
   }
-  function bindPersona(root) { root.querySelectorAll("[data-act='edit-persona']").forEach((el) => el.onclick = () => window.App.openPersonaForm()); }
+  function bindPersona(root) {
+    root.querySelectorAll("[data-act='edit-persona']").forEach((el) => el.onclick = () => window.App.openPersonaForm());
+    root.querySelectorAll("[data-act='gen-branches']").forEach((el) => el.onclick = () => {
+      const branches = window.AI.generateAudienceBranches(S.get().persona.audience);
+      const out = root.querySelector("#branch-out");
+      out.innerHTML = branches.map((b, i) => `
+        <div class="scene-card">
+          <div class="scene-top"><span class="pill pill-accent">${esc(b.name)}</span><span class="pill pill-gray">${esc(b.videoType)}</span><span class="pill pill-blue">${esc(b.platform)}</span></div>
+          <div class="kv" style="margin-top:4px"><div class="k">Dor</div><div class="v">${esc(b.pain)}</div><div class="k">Desejo</div><div class="v">${esc(b.desire)}</div><div class="k">Linguagem</div><div class="v">${esc(b.language)}</div><div class="k">Gancho</div><div class="v">${esc(b.hook)}</div><div class="k">CTA</div><div class="v">${esc(b.cta)}</div></div>
+          <button class="btn btn-xs mt-16" data-savebranch="${i}">💾 Salvar na biblioteca</button>
+        </div>`).join("");
+      out.querySelectorAll("[data-savebranch]").forEach((bt) => bt.onclick = () => { const b = branches[+bt.dataset.savebranch]; S.actions.addLibrary({ type: "Públicos/subpúblicos", title: b.name, content: `Dor: ${b.pain}. Desejo: ${b.desire}. Gancho: ${b.hook}. CTA: ${b.cta}. Plataforma: ${b.platform}.`, tags: ["público"] }); U.toast("Subpúblico salvo ✓"); });
+      U.toast(branches.length + " subpúblicos gerados ✓");
+    });
+  }
 
   // ============================================================
   // CONFIGURAÇÕES
@@ -2494,15 +2854,145 @@ window.Recorder = (function () {
 </script>
   <script>
 /* ============================================================
-   R.E.A.L. OS — Card detalhado (drawer com 9 abas)
-   Resumo · Estratégia · Roteiro · Conteúdo · Checklist ·
-   Publicação · Análise · Correção · Arquivos
+   VIRALIZA — Criar campanha com IA (conversacional)
+   Pouca entrada, muita saída: o usuário escolhe por botões e a
+   IA monta a campanha + cards prontos.
+   ============================================================ */
+window.CampaignWizard = (function () {
+  const S = window.Store, U = window.UI, AI = window.AI, esc = U.esc;
+  let w = null;
+
+  const GOALS = ["Vender produto", "Campanha de afiliado", "Gerar vídeos com foto do produto", "Gravar vídeos com teleprompter", "Analisar vídeo já gravado", "Criar conteúdo orgânico", "Marketplace", "Live Shop"];
+  const CHANNELS = ["Instagram", "TikTok", "YouTube Shorts", "Facebook", "WhatsApp", "Marketplace", "Anúncios"];
+  const STYLES = ["Direto e vendedor", "Natural estilo UGC", "Antes e depois", "Review", "Demonstração", "Prova social", "Humor leve", "Premium", "Popular", "Educativo", "Urgência/oferta", "Storytelling"];
+  const MATERIAL = ["Tenho foto do produto", "Tenho vídeo gravado", "Tenho link de referência", "Tenho link de afiliado", "Tenho só a ideia", "Quero gravar agora"];
+  const QUANTITY = ["1 vídeo", "3 vídeos", "5 vídeos", "7 dias de conteúdo", "10 variações"];
+
+  function open(prefill) {
+    w = { text: (prefill && prefill.text) || "", goal: "Vender produto", channels: ["Instagram", "TikTok"], style: "Direto e vendedor", material: [], quantity: "3 vídeos", audience: "" };
+    renderForm();
+  }
+
+  function chips(list, selected, multi, key) {
+    const isSel = (v) => multi ? (w[key] || []).includes(v) : w[key] === v;
+    return `<div class="chip-select">${list.map((v) => `<div class="chip ${isSel(v) ? "on" : ""}" data-wchip="${key}" data-val="${esc(v)}" data-multi="${multi ? 1 : 0}">${esc(v)}</div>`).join("")}</div>`;
+  }
+
+  function renderForm() {
+    U.modal({
+      title: "Criar campanha com IA", size: "wide",
+      body: `
+        <div class="msg ai" style="max-width:100%;margin-bottom:16px"><div class="m-ava">✦</div><div class="m-bubble">Me diga em poucas palavras o que você quer criar. Pode ser um produto, uma ideia, um link de afiliado, um vídeo que você já gravou ou uma campanha para gerar vendas.</div></div>
+        <div class="field"><textarea class="textarea" id="w-text" placeholder="Ex: Quero vender um kit de quadros decorativos usando vídeos para Instagram e TikTok.">${esc(w.text)}</textarea></div>
+        <div class="field"><label>O que você quer criar?</label>${chips(GOALS, w.goal, false, "goal")}</div>
+        <div class="field"><label>Onde quer publicar?</label>${chips(CHANNELS, w.channels, true, "channels")}</div>
+        <div class="field"><label>Estilo do vídeo</label>${chips(STYLES, w.style, false, "style")}</div>
+        <div class="field"><label>Material disponível</label>${chips(MATERIAL, w.material, true, "material")}</div>
+        <div class="form-row">
+          <div class="field"><label>Quantidade desejada</label>${chips(QUANTITY, w.quantity, false, "quantity")}</div>
+          <div class="field"><label>Público (opcional)</label><input class="input" id="w-aud" value="${esc(w.audience)}" placeholder="Ex: mães que querem organizar a cozinha"/></div>
+        </div>`,
+      foot: `<button class="btn btn-ghost" data-close>Cancelar</button><button class="btn btn-primary" id="w-preview">✦ Gerar prévia com IA</button>`,
+      onMount: (o) => {
+        o.querySelectorAll("[data-wchip]").forEach((el) => el.onclick = () => {
+          const key = el.dataset.wchip, val = el.dataset.val, multi = el.dataset.multi === "1";
+          if (multi) { w[key] = w[key] || []; const i = w[key].indexOf(val); i >= 0 ? w[key].splice(i, 1) : w[key].push(val); el.classList.toggle("on"); }
+          else { w[key] = val; o.querySelectorAll(`[data-wchip="${key}"]`).forEach((x) => x.classList.toggle("on", x.dataset.val === val)); }
+        });
+        o.querySelector("#w-preview").onclick = () => {
+          w.text = o.querySelector("#w-text").value.trim();
+          w.audience = o.querySelector("#w-aud").value.trim();
+          if (!w.text && !w.audience) return U.toast("Escreva em poucas palavras o que você quer criar", "warn");
+          w.plan = AI.generateCampaignPlan(w);
+          renderPreview();
+        };
+      },
+    });
+  }
+
+  function renderPreview() {
+    const p = w.plan;
+    const branches = AI.generateAudienceBranches(p.audience);
+    const willGen = [
+      `${p.cardPlan.length} cards de vídeo prontos`, `${p.cardPlan.length} roteiros com gancho e cena de retenção`,
+      `sequência de stories`, `checklist de gravação`, `direção de visual (roupa, ambiente, enquadramento)`,
+      `legenda, hashtags e CTA`, `plano de publicação em ${p.channels.join(", ")}`,
+    ];
+    U.modal({
+      title: "Prévia da campanha", size: "wide",
+      body: `
+        <div class="grid grid-2" style="align-items:start">
+          <div class="info-block"><h4>🤖 A IA entendeu</h4>
+            <div class="kv">
+              <div class="k">Produto/oferta</div><div class="v">${esc(p.productName)} — ${esc(p.offer)}</div>
+              <div class="k">Objetivo</div><div class="v">${esc(p.objective)}</div>
+              <div class="k">Público inicial</div><div class="v">${esc(p.audience)}</div>
+              <div class="k">Canais</div><div class="v">${p.channels.join(", ")}</div>
+              <div class="k">Estilo</div><div class="v">${esc(p.style)}</div>
+              <div class="k">Quantidade</div><div class="v">${p.cardPlan.length} conteúdos</div>
+              <div class="k">Materiais</div><div class="v">${(p.materials || []).join(", ") || "—"}</div>
+            </div>
+          </div>
+          <div class="info-block"><h4>✨ O Viraliza vai gerar</h4>
+            ${willGen.map((g) => `<div class="analysis-row" style="padding:7px 0"><span class="ar-ico">✓</span><div>${esc(g)}</div></div>`).join("")}
+            <div class="tag-row" style="margin-top:10px">${p.cardPlan.map((c) => `<span class="pill pill-gray">${esc(c.type)}</span>`).join("")}</div>
+          </div>
+        </div>
+        <div class="info-block mb-0"><h4>👥 Subpúblicos sugeridos <span class="muted" style="font-weight:400">(crie variações por público)</span></h4>
+          <div class="tag-row">${branches.slice(0, 6).map((b, i) => `<span class="chip" data-branch="${i}">${esc(b.name)}</span>`).join("")}</div>
+          <div id="w-branch-detail"></div>
+        </div>`,
+      foot: `<button class="btn btn-ghost" data-close>Cancelar</button>
+        <button class="btn btn-sm" id="w-back">← Ajustar com IA</button>
+        <button class="btn btn-primary" id="w-create">✓ Criar campanha</button>`,
+      onMount: (o) => {
+        o.querySelector("#w-back").onclick = () => renderForm();
+        o.querySelector("#w-create").onclick = () => create();
+        o.querySelectorAll("[data-branch]").forEach((el) => el.onclick = () => {
+          const b = branches[+el.dataset.branch];
+          o.querySelectorAll("[data-branch]").forEach((x) => x.classList.remove("on")); el.classList.add("on");
+          o.querySelector("#w-branch-detail").innerHTML = `
+            <div class="scene-card" style="margin-top:12px">
+              <div class="scene-top"><span class="pill pill-accent">${esc(b.name)}</span><span class="pill pill-gray">${esc(b.videoType)}</span><span class="pill pill-blue">${esc(b.platform)}</span></div>
+              <div class="kv" style="margin-top:6px"><div class="k">Dor</div><div class="v">${esc(b.pain)}</div><div class="k">Desejo</div><div class="v">${esc(b.desire)}</div><div class="k">Linguagem</div><div class="v">${esc(b.language)}</div><div class="k">Gancho</div><div class="v">${esc(b.hook)}</div><div class="k">CTA</div><div class="v">${esc(b.cta)}</div></div>
+              <div class="flex gap-8 wrap" style="margin-top:10px"><button class="btn btn-xs" data-buse="${el.dataset.branch}">Usar este público</button><button class="btn btn-xs" data-blib="${el.dataset.branch}">Salvar na biblioteca</button></div>
+            </div>`;
+          o.querySelector(`[data-buse="${el.dataset.branch}"]`).onclick = () => { w.plan.audience = b.name; U.toast("Público atualizado para: " + b.name); o.querySelectorAll(".kv .v")[2] && null; renderPreview(); };
+          o.querySelector(`[data-blib="${el.dataset.branch}"]`).onclick = () => { S.actions.addLibrary({ type: "Públicos/subpúblicos", title: b.name, content: `Dor: ${b.pain}. Desejo: ${b.desire}. Gancho: ${b.hook}. CTA: ${b.cta}. Plataforma: ${b.platform}.`, tags: ["público"] }); U.toast("Subpúblico salvo na biblioteca ✓"); };
+        });
+      },
+    });
+  }
+
+  function create() {
+    const p = w.plan;
+    const id = S.actions.addCampaign({
+      title: p.title, type: p.type, objective: p.objective, productName: p.productName, offer: p.offer,
+      audience: p.audience, promise: p.promise, emotion: p.emotion, cta: p.cta, channels: p.channels,
+      style: p.style, videosPerDay: 2, status: "Ativa",
+      startDate: new Date().toISOString().slice(0, 10), endDate: "",
+    });
+    const camp = S.sel.campaign(id);
+    const cardIds = AI.generateCardsForCampaign(camp, p.cardPlan);
+    U.closeModal();
+    U.toast(`Campanha criada com ${cardIds.length} cards prontos ✓`);
+    location.hash = "#/campanha/" + id;
+  }
+
+  return { open };
+})();
+
+</script>
+  <script>
+/* ============================================================
+   VIRALIZA — Card detalhado (5 abas)
+   Executar · Roteiro · Conteúdo · Checklist · Análise e Correção
    ============================================================ */
 window.CardView = (function () {
-  const S = window.Store, U = window.UI, esc = U.esc, fmt = U.fmt, pill = U.statusPill;
-  let cardId = null, tab = "Resumo";
+  const S = window.Store, U = window.UI, AI = window.AI, esc = U.esc, fmt = U.fmt, pill = U.statusPill;
+  let cardId = null, tab = "Executar";
 
-  const TABS = ["Resumo", "Estratégia", "Roteiro", "Conteúdo", "Checklist", "Publicação", "Análise", "Correção", "Arquivos"];
+  const TABS = ["Executar", "Roteiro", "Conteúdo", "Checklist", "Análise e Correção"];
   const METHODS = ["Promessa Forte", "Gancho de Retenção", "Dor e Solução", "Antes e Depois", "Prova Social", "Review", "Demonstração", "Comparação", "Unboxing", "Oferta Clara", "Urgência", "Bastidor de Autoridade", "Resposta a Comentário", "Quebra de Objeção", "Conteúdo de Rua", "Produto no Dia a Dia", "Transformação", "Comunidade e Desejo", "Frases de Corte", "Volume e Distribuição", "Teste de Variações"];
   const METHOD_ICO = { "Promessa Forte": "🎯", "Gancho de Retenção": "🪝", "Dor e Solução": "💢", "Antes e Depois": "🔄", "Prova Social": "👥", "Review": "⭐", "Demonstração": "🧪", "Comparação": "⚖️", "Unboxing": "📦", "Oferta Clara": "🏷️", "Urgência": "⏰", "Bastidor de Autoridade": "🎬", "Resposta a Comentário": "💬", "Quebra de Objeção": "🛡️", "Conteúdo de Rua": "🏙️", "Produto no Dia a Dia": "🏠", "Transformação": "✨", "Comunidade e Desejo": "❤️", "Frases de Corte": "✂️", "Volume e Distribuição": "📡", "Teste de Variações": "🧬" };
 
@@ -2510,7 +3000,7 @@ window.CardView = (function () {
   const TEMPLATES = ["Zoom lento no produto", "Produto entrando em cena", "Ambiente antes e depois", "Destaque de benefício", "Oferta com CTA", "Comparação", "Demonstração visual", "Vídeo UGC simulado", "Produto em uso", "Chamada para live"];
   const CORRECTION_REASONS = ["Gancho fraco", "Produto apareceu tarde", "CTA fraco", "Vídeo longo", "Áudio ruim", "Imagem ruim", "Promessa confusa", "Faltou prova", "Faltou oferta", "Pouca emoção", "Público errado", "Canal errado", "Legenda fraca", "Baixa conversão", "Baixa retenção"];
 
-  function open(id) { cardId = id; tab = "Resumo"; render(); }
+  function open(id) { cardId = id; tab = "Executar"; render(); }
   function card() { return S.sel.card(cardId); }
 
   function render() {
@@ -2518,7 +3008,7 @@ window.CardView = (function () {
     if (!c) return U.closeModal();
     const chkDone = c.checklist.flatMap((g) => g.items).filter((i) => i.done).length;
     const chkTotal = c.checklist.flatMap((g) => g.items).length;
-    const counts = { "Correção": c.corrections.length, "Arquivos": c.files.length, "Checklist": `${chkDone}/${chkTotal}` };
+    const counts = { "Análise e Correção": c.corrections.length || null, "Checklist": `${chkDone}/${chkTotal}` };
     const tabsHTML = TABS.map((t) => `<div class="drawer-tab ${t === tab ? "active" : ""}" data-tab="${t}">${t}${counts[t] != null ? `<span class="dt-count">${counts[t]}</span>` : ""}</div>`).join("");
 
     const body = `
@@ -2552,16 +3042,123 @@ window.CardView = (function () {
   // ------------------------------------------------------------
   function renderTab(c) {
     switch (tab) {
-      case "Resumo": return tResumo(c);
-      case "Estratégia": return tEstrategia(c);
+      case "Executar": return tExecutar(c);
       case "Roteiro": return tRoteiro(c);
       case "Conteúdo": return tConteudo(c);
       case "Checklist": return tChecklist(c);
-      case "Publicação": return tPublicacao(c);
-      case "Análise": return tAnalise(c);
-      case "Correção": return tCorrecao(c);
-      case "Arquivos": return tArquivos(c);
+      case "Análise e Correção": return tAnaliseCorrecao(c);
     }
+  }
+
+  // ---------- EXECUTAR (resumo + estratégia IA + visual + ações) ----------
+  function tExecutar(c) {
+    const camp = S.sel.campaign(c.campaignId);
+    const s = c.strategy || {};
+    const v = c.visual || {};
+    const origin = c.originCardId ? S.sel.card(c.originCardId) : null;
+    return `
+      ${origin ? `<div class="alert info" style="margin-bottom:14px"><span class="al-ico">🛠️</span><div class="al-body" style="font-size:12px">Card de correção de <b>${esc(origin.title)}</b>${c.correctionReason ? " · motivo: " + esc(c.correctionReason) : ""}</div></div>` : ""}
+      <div class="grid" style="grid-template-columns:1fr 1fr;align-items:start">
+        <div>
+          <div class="info-block"><h4>⚡ Próxima ação</h4>
+            <div class="kv">
+              <div class="k">O que fazer agora</div><div class="v"><input class="input" data-f="nextAction" value="${esc(c.nextAction || "")}"/></div>
+              <div class="k">Status</div><div class="v">${selStatus(c.status)}</div>
+              <div class="k">Canal</div><div class="v">${selChannel(c.channel, "channel")}</div>
+              <div class="k">Data / hora</div><div class="v"><div class="flex gap-8"><input class="input" type="date" data-f="date" value="${esc(c.date || "")}"/><input class="input" type="time" data-f="time" value="${esc(c.time || "")}" style="max-width:120px"/></div></div>
+              <div class="k">Responsável</div><div class="v"><input class="input" data-f="responsible" value="${esc(c.responsible || "")}"/></div>
+            </div>
+            <div class="flex-between" style="margin:12px 0 6px"><span class="muted">Checklist</span><b class="text-accent">${c.progress || 0}%</b></div>
+            <div class="bar"><span style="width:${c.progress || 0}%"></span></div>
+          </div>
+          <div class="info-block mb-0"><h4>🚀 Ações</h4>
+            <div class="grid" style="grid-template-columns:1fr 1fr;gap:8px">
+              <button class="btn btn-sm" data-ca="record" style="justify-content:flex-start">🎥 Gravar agora</button>
+              <button class="btn btn-sm" data-ca="upload-gallery" style="justify-content:flex-start">📤 Enviar vídeo</button>
+              <button class="btn btn-sm" data-ca="gen-ai" style="justify-content:flex-start">✨ Gerar vídeo IA</button>
+              <button class="btn btn-sm" data-ca="analyze" style="justify-content:flex-start">🔍 Analisar</button>
+              <button class="btn btn-sm" data-ca="correction" style="justify-content:flex-start">🛠️ Criar correção</button>
+              <button class="btn btn-sm" data-ca="published" style="justify-content:flex-start">✅ Publicado</button>
+            </div>
+          </div>
+        </div>
+        <div>
+          <div class="info-block"><h4>🎯 Estratégia sugerida pela IA</h4>
+            <div class="kv">
+              <div class="k">Objetivo</div><div class="v"><input class="input" data-s="objective" value="${esc(s.objective || "")}"/></div>
+              <div class="k">Ângulo</div><div class="v"><input class="input" data-s="angle" value="${esc(s.angle || c.type || "")}"/></div>
+              <div class="k">Público</div><div class="v"><input class="input" data-s="audience" value="${esc(s.audience || "")}"/></div>
+              <div class="k">Emoção</div><div class="v"><input class="input" data-s="emotion" value="${esc(s.emotion || "")}"/></div>
+              <div class="k">Promessa</div><div class="v"><input class="input" data-s="promise" value="${esc(s.promise || "")}"/></div>
+              <div class="k">CTA</div><div class="v"><input class="input" data-s="cta" value="${esc(s.cta || "")}"/></div>
+            </div>
+            <div class="flex gap-8 wrap" style="margin-top:12px">
+              <button class="btn btn-xs" data-ca="new-strategy">🔁 Pedir nova estratégia</button>
+              <button class="btn btn-xs" data-ca="strategy-to-script">→ Aplicar no roteiro</button>
+            </div>
+          </div>
+          <div class="info-block mb-0"><h4>🎬 Visual do vídeo <span class="muted" style="font-weight:400">(gerado pela IA)</span></h4>
+            ${Object.keys(v).length ? `<div class="kv">
+              <div class="k">Roupa</div><div class="v"><input class="input" data-v="roupa" value="${esc(v.roupa || "")}"/></div>
+              <div class="k">Cores</div><div class="v"><input class="input" data-v="cor" value="${esc(v.cor || "")}"/></div>
+              <div class="k">Ambiente</div><div class="v"><input class="input" data-v="ambiente" value="${esc(v.ambiente || "")}"/></div>
+              <div class="k">Enquadramento</div><div class="v"><input class="input" data-v="enquadramento" value="${esc(v.enquadramento || "")}"/></div>
+              <div class="k">Iluminação</div><div class="v"><input class="input" data-v="iluminacao" value="${esc(v.iluminacao || "")}"/></div>
+              <div class="k">Objetos</div><div class="v"><input class="input" data-v="objetos" value="${esc(v.objetos || "")}"/></div>
+              <div class="k">Produto aparece</div><div class="v"><input class="input" data-v="momentoProduto" value="${esc(v.momentoProduto || "")}"/></div>
+              <div class="k">Energia da fala</div><div class="v"><input class="input" data-v="energia" value="${esc(v.energia || "")}"/></div>
+            </div>` : `<p class="muted" style="margin-bottom:10px">Ainda sem direção de visual.</p>`}
+            <button class="btn btn-xs mt-16" data-ca="gen-visual">✨ ${Object.keys(v).length ? "Gerar novo visual" : "Gerar visual com IA"}</button>
+          </div>
+        </div>
+      </div>`;
+  }
+
+  // ---------- ANÁLISE E CORREÇÃO (fusão) ----------
+  function tAnaliseCorrecao(c) {
+    const a = c.analysis || {};
+    const m = a.metrics || {};
+    const p = c.publication || {};
+    const fields = [["views", "Views"], ["retention", "Retenção"], ["likes", "Curtidas"], ["comments", "Coment."], ["saves", "Salvos"], ["clicks", "Cliques"], ["sales", "Vendas"], ["conversion", "Conversão"]];
+    const inputs = fields.map(([k, l]) => `<div class="field mb-0"><label>${l}</label><input class="input" data-m="${k}" value="${esc(m[k] != null ? m[k] : "")}"/></div>`).join("");
+    const versions = (c.video && c.video.versions || []);
+    const cor = c.corrections || [];
+    const linked = S.get().cards.filter((x) => x.originCardId === c.id);
+    return `
+      <div class="grid" style="grid-template-columns:1fr 1fr;align-items:start">
+        <div class="info-block"><h4>📊 Métricas ${a.done ? "" : "(inserir)"}</h4>
+          <div class="grid" style="grid-template-columns:1fr 1fr;gap:10px">${inputs}</div>
+          <div class="field mb-0" style="margin-top:12px"><label>🔗 Link publicado</label><input class="input" data-p="link" placeholder="Cole o link do post" value="${esc(p.link || "")}"/></div>
+          <button class="btn btn-primary btn-sm mt-16" data-ca="save-metrics">💾 Salvar e analisar</button>
+        </div>
+        <div>
+          ${a.done && a.summary ? `<div class="info-block"><h4>🤖 Diagnóstico da IA</h4>
+            <div class="analysis-row"><span class="ar-ico">✅</span><div><b style="color:var(--text-0)">Funcionou:</b> ${esc(a.summary.worked)}</div></div>
+            <div class="analysis-row"><span class="ar-ico">⚠️</span><div><b style="color:var(--text-0)">Corrigir:</b> ${esc(a.summary.fix)}</div></div>
+            <div class="analysis-row"><span class="ar-ico">🧬</span><div><b style="color:var(--text-0)">Variação:</b> ${esc(a.summary.variation)}</div></div>
+          </div>` : `<div class="empty" style="padding:24px"><div class="e-ico">📊</div><h3>Sem análise ainda</h3><p>Insira as métricas para a IA gerar o diagnóstico.</p></div>`}
+        </div>
+      </div>
+
+      <div class="section-title" style="margin-top:6px"><span class="st-ico">🛠️</span><h2>Correção</h2></div>
+      <div class="grid grid-2" style="align-items:start">
+        <div class="info-block"><h4>✏️ Correção no mesmo card <span class="muted" style="font-weight:400">(variação pequena)</span></h4>
+          <p class="muted" style="font-size:12px;margin-bottom:10px">Trocar gancho, CTA, cortar início, melhorar legenda ou texto na tela — sem regravar.</p>
+          <button class="btn btn-sm" data-ca="quick-correction">🤖 Gerar correção sugerida</button>
+          <div id="quick-cor-box"></div>
+        </div>
+        <div class="info-block"><h4>🎬 Novo card de correção <span class="muted" style="font-weight:400">(regravar/nova peça)</span></h4>
+          <p class="muted" style="font-size:12px;margin-bottom:10px">Regravar, novo criativo, outro ângulo ou público. Nasce vinculado a este card.</p>
+          <div class="field"><label>Motivo</label><select class="select" id="cor-reason">${CORRECTION_REASONS.map((r) => `<option>${esc(r)}</option>`).join("")}</select></div>
+          <button class="btn btn-primary btn-sm" data-ca="new-correction-card">➕ Criar novo card de correção</button>
+        </div>
+      </div>
+
+      <div class="info-block"><h4>🎞️ Histórico de versões</h4>
+        ${versions.length ? versions.map((ver) => `<div class="file-tile" style="margin-bottom:8px"><div class="ft-ico">${ver.kind === "Abertura Inteligente" ? "✨" : ver.kind === "Variação" ? "🧬" : "🎬"}</div><div style="flex:1"><div class="ft-name">${esc(ver.label)} ${c.video && c.video.chosenVersionId === ver.id ? '<span class="pill pill-accent">Em uso</span>' : ""}</div><div class="ft-meta">${esc(ver.kind)} · ${esc(ver.status || "")}</div></div></div>`).join("") : `<p class="muted" style="font-size:12px">Sem versões de vídeo ainda. Grave, envie ou gere um vídeo na aba Conteúdo.</p>`}
+        ${cor.length ? `<div class="divider"></div>${cor.map((x) => `<div class="analysis-row"><span class="ar-ico">🛠️</span><div><b style="color:var(--text-0)">${esc(x.reason)}</b> — ${esc(x.note || x.diagnosis || "")} <span class="muted">${esc(x.createdAt || "")}</span></div></div>`).join("")}` : ""}
+        ${linked.length ? `<div class="divider"></div><p class="muted" style="font-size:12px;margin-bottom:6px">Cards de correção vinculados:</p>${linked.map((x) => `<div class="file-tile" style="margin-bottom:8px;cursor:pointer" data-openlinked="${x.id}"><div class="ft-ico">🎬</div><div style="flex:1"><div class="ft-name">${esc(x.title)}</div><div class="ft-meta">${esc(x.correctionReason || "")}</div></div>${pill(x.status)}</div>`).join("")}` : ""}
+      </div>`;
   }
 
   // ---------- RESUMO ----------
@@ -2648,8 +3245,13 @@ window.CardView = (function () {
   // ---------- ROTEIRO ----------
   function tRoteiro(c) {
     const s = c.script || {};
-    const tools = [["melhorar-gancho", "Melhorar gancho"], ["mais-direto", "Mais direto"], ["mais-popular", "Mais popular"], ["mais-emocional", "Mais emocional"], ["mais-vendedor", "Mais vendedor"], ["versao-curta", "Versão curta"], ["versao-anuncio", "Versão anúncio"], ["versao-stories", "Versão stories"], ["salvar-lib", "Salvar na biblioteca"], ["variacao", "Transformar em variação"]];
+    const hasScript = !!(s.hook || s.mainLine);
+    const gen = [["gen-script", "✨ Gerar roteiro completo"], ["gen-hooks", "🪝 Gerar 3 ganchos"], ["gen-stories", "📲 Gerar stories"], ["gen-audience-var", "👥 Variação por público"], ["versao-curta", "⏱️ Versão curta"], ["versao-anuncio", "📢 Versão anúncio"], ["salvar-lib", "📚 Salvar na biblioteca"]];
+    const tools = [["melhorar-gancho", "Melhorar gancho"], ["mais-direto", "Mais direto"], ["mais-popular", "Mais popular"], ["mais-emocional", "Mais emocional"], ["mais-vendedor", "Mais vendedor"], ["variacao", "Transformar em variação"]];
     return `
+      <div class="info-block" style="padding:12px 14px"><div class="flex gap-8 wrap">${gen.map(([a, l]) => `<button class="btn btn-sm" data-ca="${a}">${l}</button>`).join("")}</div></div>
+      ${s.retention ? `<div class="alert good" style="margin-bottom:14px"><span class="al-ico">🎯</span><div class="al-body" style="font-size:12px"><b>Cena de retenção:</b> ${esc(s.retention.start)}–${esc(s.retention.end)} · ${esc(s.retention.type)} — “${esc(s.retention.screenText)}”</div></div>` : ""}
+      ${hasScript ? "" : `<div class="empty" style="padding:20px"><div class="e-ico">📝</div><h3>Sem roteiro ainda</h3><p>Clique em <b>Gerar roteiro completo</b> — a IA cria gancho, cena de retenção, fala, texto na tela, CTA, legenda e hashtags.</p></div>`}
       <div class="flex gap-8 wrap" style="margin-bottom:16px">${tools.map(([a, l]) => `<button class="btn btn-xs" data-rt="${a}">${l}</button>`).join("")}</div>
       <div class="grid grid-2" style="align-items:start">
         <div>
@@ -2782,15 +3384,26 @@ window.CardView = (function () {
       ${takes.length ? `<div class="info-block mb-0"><h4>🎬 Takes gravados</h4>${takes.map((cr) => `<div class="file-tile" style="margin-bottom:8px"><div class="ft-ico">🎬</div><div style="flex:1"><div class="ft-name">${esc(cr.fileName || cr.type)}</div><div class="ft-meta">${esc(cr.type)} · ${esc(cr.source)}</div></div><span class="pill pill-accent">${esc(cr.status)}</span></div>`).join("")}<button class="btn btn-sm mt-16" data-ca="open-recorder">🎥 Gravar outro take</button></div>` : ""}`;
   }
 
-  // ---------- CHECKLIST ----------
+  // ---------- CHECKLIST (editável) ----------
   function tChecklist(c) {
-    return c.checklist.map((g, gi) => {
+    const groups = (c.checklist || []).map((g, gi) => {
       const done = g.items.filter((i) => i.done).length;
       return `<div class="chk-group">
-        <div class="chk-group-head">📌 ${esc(g.group)}<span class="chk-prog">${done}/${g.items.length}</span></div>
-        ${g.items.map((i, ii) => `<div class="chk-item"><div class="chk-box ${i.done ? "done" : ""}" data-chk="${gi}-${ii}">${i.done ? "✓" : ""}</div><div class="ci-text ${i.done ? "done" : ""}">${esc(i.t)}</div></div>`).join("")}
+        <div class="chk-group-head">📌 <span data-chkgname="${gi}" style="cursor:text" title="Clique para renomear">${esc(g.group)}</span><span class="chk-prog">${done}/${g.items.length}</span>
+          <span class="x-btn" data-chkdelg="${gi}" title="Apagar grupo" style="width:26px;height:26px">🗑️</span></div>
+        ${g.items.map((i, ii) => `<div class="chk-item">
+          <div class="chk-box ${i.done ? "done" : ""}" data-chk="${gi}-${ii}">${i.done ? "✓" : ""}</div>
+          <div class="ci-text ${i.done ? "done" : ""}" data-chkedit="${gi}-${ii}" style="cursor:text">${esc(i.t)}</div>
+          <span class="x-btn" data-chkdel="${gi}-${ii}" title="Apagar" style="width:26px;height:26px">✕</span>
+        </div>`).join("")}
+        <div class="chk-item" style="opacity:.9"><div class="chk-box" style="border-style:dashed">+</div><input class="input" data-chkadd="${gi}" placeholder="Adicionar item… (Enter)" style="background:transparent;border:none;padding:6px 0"/></div>
       </div>`;
     }).join("");
+    return `${groups}
+      <div class="flex gap-8 wrap" style="margin-top:12px">
+        <button class="btn btn-sm" data-ca="add-group">+ Adicionar grupo</button>
+        <button class="btn btn-sm" data-ca="reset-checklist">🤖 Gerar checklist com IA</button>
+      </div>`;
   }
 
   // ---------- PUBLICAÇÃO ----------
@@ -2917,8 +3530,19 @@ window.CardView = (function () {
     // Methods (apply strategy)
     root.querySelectorAll("[data-method]").forEach((el) => el.onclick = () => applyMethod(el.dataset.method));
 
-    // Checklist
+    // Visual do vídeo
+    root.querySelectorAll("[data-v]").forEach((el) => el.onchange = () => S.actions.patchCard(cardId, "visual." + el.dataset.v, el.value));
+    // Cards de correção vinculados
+    root.querySelectorAll("[data-openlinked]").forEach((el) => el.onclick = () => window.App.openCard(el.dataset.openlinked));
+
+    // Checklist (editável)
     root.querySelectorAll("[data-chk]").forEach((el) => el.onclick = () => { const [gi, ii] = el.dataset.chk.split("-").map(Number); S.actions.toggleChecklist(cardId, gi, ii); refreshBody(); });
+    root.querySelectorAll("[data-chkedit]").forEach((el) => el.onblur = () => { const [gi, ii] = el.dataset.chkedit.split("-").map(Number); const t = el.innerText.trim(); if (t) S.actions.chkEditItem(cardId, gi, ii, t); });
+    root.querySelectorAll("[data-chkedit]").forEach((el) => el.setAttribute("contenteditable", "true"));
+    root.querySelectorAll("[data-chkdel]").forEach((el) => el.onclick = () => { const [gi, ii] = el.dataset.chkdel.split("-").map(Number); S.actions.chkDelItem(cardId, gi, ii); refreshBody(); });
+    root.querySelectorAll("[data-chkdelg]").forEach((el) => el.onclick = () => { U.confirm("Apagar este grupo do checklist?", () => { S.actions.chkDelGroup(cardId, +el.dataset.chkdelg); refreshBody(); }, { danger: true, yes: "Apagar" }); });
+    root.querySelectorAll("[data-chkgname]").forEach((el) => { el.setAttribute("contenteditable", "true"); el.onblur = () => { const t = el.innerText.trim(); if (t) S.actions.chkRenameGroup(cardId, +el.dataset.chkgname, t); }; });
+    root.querySelectorAll("[data-chkadd]").forEach((el) => el.onkeydown = (e) => { if (e.key === "Enter") { const t = el.value.trim(); if (t) { S.actions.chkAddItem(cardId, +el.dataset.chkadd, t); refreshBody(); } } });
 
     // Content path switch (Gravar agora abre o estúdio direto)
     root.querySelectorAll("[data-path]").forEach((el) => el.onclick = () => { S.actions.patchCard(cardId, "content.path", el.dataset.path || null); refreshBody(); if (el.dataset.path === "gravar") window.Recorder.open(cardId); });
@@ -2967,6 +3591,66 @@ window.CardView = (function () {
     return map[method] || { hook: c.script.hook || `Método ${method} aplicado`, next: c.nextAction };
   }
 
+  // Variação por público (usa ramificação da IA)
+  function genAudienceVariation(c) {
+    const camp = S.sel.campaign(c.campaignId) || {};
+    const branches = AI.generateAudienceBranches((c.strategy && c.strategy.audience) || camp.audience || "público");
+    U.modal({
+      title: "Variação por público", size: "",
+      body: `<p class="muted" style="margin-bottom:12px">Escolha um subpúblico. A IA cria um novo card com roteiro adaptado.</p>
+        ${branches.slice(0, 6).map((b, i) => `<div class="status-row" data-br="${i}" style="cursor:pointer"><div style="flex:1"><b style="color:var(--text-0)">${esc(b.name)}</b><div class="muted" style="font-size:12px">${esc(b.videoType)} · ${esc(b.platform)} · "${esc(b.hook)}"</div></div><span class="text-accent">→</span></div>`).join("")}`,
+      onMount: (o) => o.querySelectorAll("[data-br]").forEach((el) => el.onclick = () => {
+        const b = branches[+el.dataset.br];
+        const nid = S.actions.addCard({ title: c.title + " — " + b.name, type: b.videoType, campaignId: c.campaignId, channel: b.platform, status: "Pronto para gravar", priority: "Média", nextAction: "Gravar para " + b.name,
+          strategy: { objective: (c.strategy && c.strategy.objective) || "", angle: b.videoType, audience: b.name, pain: b.pain, desire: b.desire, promise: (c.strategy && c.strategy.promise) || "", emotion: "identificação", cta: b.cta },
+          script: Object.assign({}, AI.generateScriptForCard({ type: b.videoType, strategy: { pain: b.pain } }, camp), { hook: b.hook, cta: b.cta }) });
+        U.closeModal(); U.toast("Variação para “" + b.name + "” criada ✓"); window.App.openCard(nid);
+      }),
+    });
+  }
+
+  // Correção no mesmo card (variação pequena)
+  function quickCorrection(c) {
+    const cor = AI.generateCorrectionFromAnalysis(c, c.analysis);
+    const box = document.getElementById("quick-cor-box");
+    if (!box) return;
+    box.innerHTML = `
+      <div class="scene-card" style="margin-top:12px">
+        <div class="scene-top"><span class="pill pill-amber">${esc(cor.reason)}</span></div>
+        <div class="scene-reason">${esc(cor.diagnosis)}</div>
+        <div class="kv" style="margin-top:6px">
+          <div class="k">Novo gancho</div><div class="v">${esc(cor.correctedScript.hook)}</div>
+          <div class="k">Abertura</div><div class="v">${esc(cor.correctedScript.opening)}</div>
+          <div class="k">Novo CTA</div><div class="v">${esc(cor.correctedScript.cta)}</div>
+          <div class="k">Texto na tela</div><div class="v">“${esc(cor.correctedScript.screenText)}”</div>
+        </div>
+        <button class="btn btn-primary btn-sm mt-16" id="qc-apply">💾 Salvar como nova versão do roteiro</button>
+      </div>`;
+    box.querySelector("#qc-apply").onclick = () => {
+      S.actions.patchCard(cardId, "script.hook", cor.correctedScript.hook);
+      S.actions.patchCard(cardId, "script.opening", cor.correctedScript.opening);
+      S.actions.patchCard(cardId, "script.cta", cor.correctedScript.cta);
+      S.actions.addCorrection(cardId, { reason: cor.reason, note: "Correção aplicada no mesmo card (gancho/abertura/CTA).", status: "Aplicada" });
+      U.toast("Correção aplicada ao roteiro ✓"); refreshBody();
+    };
+  }
+
+  // Novo card de correção vinculado
+  function createCorrectionCard(c, reason) {
+    const camp = S.sel.campaign(c.campaignId) || {};
+    const cor = AI.generateCorrectionFromAnalysis(c, c.analysis);
+    const ns = Object.assign({}, AI.generateScriptForCard(c, camp), { hook: cor.correctedScript.hook, opening: cor.correctedScript.opening, cta: cor.correctedScript.cta });
+    const nid = S.actions.addCard({
+      title: "Correção — " + reason, type: c.type, campaignId: c.campaignId, channel: c.channel,
+      status: "Precisa corrigir", priority: "Alta", nextAction: "Regravar aplicando a correção",
+      originCardId: c.id, correctionReason: reason, methods: c.methods,
+      strategy: Object.assign({}, c.strategy), script: ns, visual: c.visual || {},
+    });
+    S.actions.addCorrection(cardId, { reason, note: "Gerou novo card de correção.", status: "Gerou novo card" });
+    U.toast("Novo card de correção criado ✓");
+    window.App.openCard(nid);
+  }
+
   function roteiroTool(tool) {
     const c = card();
     const s = c.script;
@@ -3006,16 +3690,36 @@ window.CardView = (function () {
         S.update((s) => { const cc = s.cards.find((x) => x.id === cardId); if (cc.content.creatives[0]) cc.content.creatives[0].status = "Analisado"; });
         U.toast("Vídeo enviado para análise da IA ✓"); render(); break;
       case "gen-ai": S.actions.patchCard(cardId, "content.path", "gerar"); tab = "Conteúdo"; render(); break;
+      // ---- IA: estratégia, roteiro, visual, checklist ----
+      case "new-strategy": { const camp = S.sel.campaign(c.campaignId) || {}; S.actions.updateCard(cardId, { strategy: AI.generateStrategyForCard(c, camp) }); U.toast("Nova estratégia gerada pela IA ✓"); refreshBody(); break; }
+      case "strategy-to-script": { const camp = S.sel.campaign(c.campaignId) || {}; S.actions.updateCard(cardId, { script: AI.generateScriptForCard(c, camp) }); U.toast("Estratégia aplicada no roteiro ✓"); tab = "Roteiro"; render(); break; }
+      case "gen-visual": { const camp = S.sel.campaign(c.campaignId) || {}; S.actions.updateCard(cardId, { visual: AI.generateVisualDirection(c, camp) }); U.toast("Visual do vídeo gerado pela IA ✓"); refreshBody(); break; }
+      case "gen-script": { const camp = S.sel.campaign(c.campaignId) || {}; S.actions.updateCard(cardId, { script: AI.generateScriptForCard(c, camp) }); U.toast("Roteiro completo gerado ✓"); refreshBody(); break; }
+      case "gen-hooks": { const camp = S.sel.campaign(c.campaignId) || {}; const ns = AI.generateScriptForCard(c, camp); S.actions.patchCard(cardId, "script.hook", ns.hook); S.actions.patchCard(cardId, "script.hookAlt1", ns.hookAlt1); S.actions.patchCard(cardId, "script.hookAlt2", ns.hookAlt2); U.toast("3 ganchos gerados ✓"); refreshBody(); break; }
+      case "gen-stories": { const camp = S.sel.campaign(c.campaignId) || {}; S.actions.patchCard(cardId, "script.stories", AI.generateStoriesForCard(c, camp).join("\n")); U.toast("Stories gerados ✓"); refreshBody(); break; }
+      case "gen-audience-var": genAudienceVariation(c); break;
+      case "versao-curta": U.simulated("Versão curta", "Versão de 10s criada como variação."); break;
+      case "versao-anuncio": U.simulated("Versão anúncio", "Versão para anúncio criada como variação."); break;
+      case "salvar-lib": S.actions.addLibrary({ type: "Roteiro vencedor", title: c.script.title || c.title, content: c.script.hook || "", source: cardId, tags: ["roteiro"] }); U.toast("Roteiro salvo na biblioteca ✓"); break;
+      // ---- Checklist ----
+      case "add-group": U.modal({ title: "Novo grupo", size: "narrow", body: `<div class="field mb-0"><input class="input" id="ng-name" placeholder="Nome do grupo"/></div>`, foot: `<button class="btn btn-ghost" data-close>Cancelar</button><button class="btn btn-primary" id="ng-ok">Adicionar</button>`, onMount: (o) => o.querySelector("#ng-ok").onclick = () => { const n = o.querySelector("#ng-name").value.trim(); if (!n) return; S.actions.chkAddGroup(cardId, n); U.closeModal(); refreshBody(); } }); break;
+      case "reset-checklist": { const camp = S.sel.campaign(c.campaignId) || {}; S.actions.setChecklist(cardId, AI.generateChecklistForCard(c, camp)); U.toast("Checklist gerado pela IA ✓"); refreshBody(); break; }
+      // ---- Correção ----
+      case "quick-correction": quickCorrection(c); break;
+      case "new-correction-card": { const reason = document.querySelector("#cor-reason").value; createCorrectionCard(c, reason); break; }
       case "analyze":
         S.actions.setCardStatus(cardId, "Enviado para análise");
         S.actions.addCreative(cardId, { type: "Vídeo enviado", source: "Upload", status: "Analisado", fileName: "video-enviado.mp4", creditsUsed: 0 });
         U.toast("Vídeo analisado pela IA ✓"); render(); break;
       case "gen-ai-confirm":
-        if (cr.available < 12) return U.toast("Créditos insuficientes", "warn");
+        if (cr.available < 12) return U.toast("Créditos insuficientes — compre mais", "warn");
         U.confirm("Essa geração consumirá 12 créditos. Deseja continuar?", () => {
           S.actions.spendCredits(12, "Vídeo IA — " + c.title);
-          S.actions.addCreative(cardId, { type: "Vídeo IA", source: "IA (foto do produto)", template: "Zoom lento no produto", status: "Gerado", creditsUsed: 12, fileName: "video-ia-" + cardId.slice(-4) + ".mp4" });
-          U.toast("Vídeo IA gerado ✓ (12 créditos)"); refreshBody();
+          const tpl = (document.querySelector("#gen-tpl") || {}).value;
+          const creative = AI.generateVideoCreativeMock(c, { template: tpl, cost: 12 });
+          S.actions.addCreative(cardId, creative);
+          S.actions.setCardStatus(cardId, "Em edição");
+          U.toast("Vídeo IA gerado (simulado) ✓ — 12 créditos"); refreshBody();
         }, { yes: "Gerar (12 créditos)" }); break;
       case "upload-video":
         S.actions.addCreative(cardId, { type: "Vídeo enviado", source: "Upload", status: "Enviado", fileName: "meu-video.mp4", creditsUsed: 0 });
@@ -3032,7 +3736,7 @@ window.CardView = (function () {
         U.toast("Variação criada no Board ✓"); break;
       case "published":
         S.actions.setCardStatus(cardId, "Publicado"); S.actions.patchCard(cardId, "publication.status", "Publicado"); U.toast("Marcado como publicado ✓"); refreshHead(); break;
-      case "correction": tab = "Correção"; render(); break;
+      case "correction": tab = "Análise e Correção"; render(); break;
       case "create-correction": {
         const reason = document.querySelector("#cor-reason").value;
         const note = document.querySelector("#cor-note").value || "IA gerou novo gancho, roteiro, legenda e CTA.";
@@ -3214,6 +3918,8 @@ window.App = (function () {
   const ALL_CHANNELS = ["Instagram", "TikTok", "YouTube Shorts", "Facebook", "WhatsApp", "Marketplace", "Live Shop", "Anúncios"];
 
   function openCampaignForm(id, prefill) {
+    // Nova campanha = fluxo conversacional com IA. Editar = form avançado.
+    if (!id) { window.CampaignWizard.open(prefill); return; }
     const c = id ? S.sel.campaign(id) : Object.assign({ channels: [], type: "Afiliado" }, prefill || {});
     U.modal({
       title: id ? "Editar campanha" : "Nova campanha", size: "wide",
@@ -3383,13 +4089,101 @@ window.App = (function () {
 
   function generateCards(campaignId) {
     const camp = S.sel.campaign(campaignId);
-    U.confirm(`A IA vai gerar cards de conteúdo para "${camp.title}" (dor e solução, review, comparação, demonstração, prova social). Continuar?`, () => {
-      const types = camp.type === "Afiliado"
-        ? ["Dor e Solução", "Review", "Comparação", "Demonstração", "Prova social"]
-        : ["Dor e Solução", "Demonstração", "Oferta"];
-      types.forEach((t, i) => S.actions.addCard({ title: `${t} — ${camp.productName || camp.title}`, campaignId, type: t, channel: (camp.channels && camp.channels[i % camp.channels.length]) || "Instagram", status: "Ideia", priority: i === 0 ? "Alta" : "Média", objective: camp.objective, nextAction: "Gerar roteiro", strategy: { promise: camp.promise, cta: camp.cta, offer: camp.offer, audience: camp.audience, pain: camp.dor, emotion: camp.emotion } }));
-      U.toast(`${types.length} cards gerados pela IA ✓`); render();
+    const plan = window.AI.generateCampaignPlan({ text: camp.productName || camp.title, goal: camp.type === "Afiliado" ? "Campanha de afiliado" : "Vender produto", channels: camp.channels, style: camp.style || "Direto e vendedor", audience: camp.audience, quantity: "5 vídeos" });
+    U.confirm(`A IA vai gerar ${plan.cardPlan.length} cards prontos (com roteiro, gancho, cena de retenção, visual, checklist e CTA) para "${camp.title}". Continuar?`, () => {
+      const ids = window.AI.generateCardsForCampaign(camp, plan.cardPlan);
+      U.toast(`${ids.length} cards gerados pela IA ✓`); render();
     }, { yes: "Gerar cards" });
+  }
+
+  // ---------- Biblioteca: menu e reutilizar ----------
+  function libMenu(id) {
+    const l = S.get().library.find((x) => x.id === id);
+    const items = [["reuse", "♻️ Reutilizar"], ["edit", "✏️ Editar"], ["variation", "🧬 Criar variação"], ["copy", "📋 Copiar"], ["delete", "🗑️ Apagar"]];
+    U.modal({
+      title: l.title, size: "narrow",
+      body: `<div class="set-nav">${items.map(([a, t]) => `<div class="set-nav-item" data-lm="${a}" ${a === "delete" ? 'style="color:var(--red)"' : ""}>${t}</div>`).join("")}</div>`,
+      onMount: (o) => o.querySelectorAll("[data-lm]").forEach((el) => el.onclick = () => {
+        const a = el.dataset.lm; U.closeModal();
+        if (a === "reuse") reuseLibrary(id);
+        else if (a === "edit") editLibrary(id);
+        else if (a === "variation") { S.actions.addLibrary({ type: l.type, title: l.title + " (variação)", content: l.content, tags: l.tags }); U.toast("Variação salva na biblioteca ✓"); render(); }
+        else if (a === "copy") { try { navigator.clipboard.writeText(l.title + "\n" + l.content); } catch (e) {} U.toast("Copiado ✓"); }
+        else if (a === "delete") U.confirm("Apagar este item da biblioteca?", () => { S.actions.deleteLibrary(id); U.toast("Item apagado"); render(); }, { danger: true, yes: "Apagar" });
+      }),
+    });
+  }
+
+  function editLibrary(id) {
+    const l = S.get().library.find((x) => x.id === id);
+    U.modal({
+      title: "Editar item", size: "",
+      body: `${field("Título", "el-title", l.title)}${textField("Conteúdo", "el-content", l.content)}${field("Tags", "el-tags", (l.tags || []).join(", "))}`,
+      foot: `<button class="btn btn-ghost" data-close>Cancelar</button><button class="btn btn-primary" id="el-save">Salvar</button>`,
+      onMount: (o) => o.querySelector("#el-save").onclick = () => { S.actions.updateLibrary(id, { title: o.querySelector("#el-title").value, content: o.querySelector("#el-content").value, tags: o.querySelector("#el-tags").value.split(",").map((t) => t.trim()).filter(Boolean) }); U.closeModal(); U.toast("Item atualizado ✓"); render(); },
+    });
+  }
+
+  function reuseLibrary(id) {
+    const l = S.get().library.find((x) => x.id === id);
+    const opts = [["new-card", "🃏 Criar novo card"], ["new-campaign", "🎯 Criar nova campanha"], ["variation", "🧬 Salvar como variação"], ["copy", "📋 Copiar conteúdo"]];
+    U.modal({
+      title: "Reutilizar: " + l.title, size: "narrow",
+      body: `<p class="muted" style="margin-bottom:12px">Como você quer usar este item?</p><div class="set-nav">${opts.map(([a, t]) => `<div class="set-nav-item" data-ru="${a}">${t}</div>`).join("")}</div>`,
+      onMount: (o) => o.querySelectorAll("[data-ru]").forEach((el) => el.onclick = () => {
+        const a = el.dataset.ru; U.closeModal();
+        if (a === "new-card") { const nid = S.actions.addCard({ title: l.title, type: "Conteúdo orgânico", status: "Ideia", nextAction: "Gerar roteiro", script: { hook: l.type.includes("Gancho") ? l.title : "", caption: l.type.includes("Legenda") ? l.content : "", cta: l.type === "CTA" ? l.content : "" } }); U.toast("Card criado a partir da biblioteca ✓"); openCard(nid); }
+        else if (a === "new-campaign") window.CampaignWizard.open({ text: l.title + " — " + l.content });
+        else if (a === "variation") { S.actions.addLibrary({ type: l.type, title: l.title + " (variação)", content: l.content, tags: l.tags }); U.toast("Variação salva ✓"); render(); }
+        else if (a === "copy") { try { navigator.clipboard.writeText(l.title + "\n" + l.content); } catch (e) {} U.toast("Copiado ✓"); }
+      }),
+    });
+  }
+
+  // ---------- Board: menu de card e coluna ----------
+  function cardMenu(id) {
+    const c = S.sel.card(id);
+    const items = [
+      ["open", "📂 Abrir", "abrir"], ["edit", "✏️ Editar", "editar"], ["duplicate", "📄 Duplicar", "duplicar"],
+      ["variation", "🧬 Criar variação", "variação"], ["correction", "🛠️ Criar correção", "correção"], ["delete", "🗑️ Apagar", "apagar"],
+    ];
+    U.modal({
+      title: c.title, size: "narrow",
+      body: `<div class="set-nav">${items.map(([a, l]) => `<div class="set-nav-item" data-cm="${a}" ${a === "delete" ? 'style="color:var(--red)"' : ""}>${l}</div>`).join("")}</div>`,
+      onMount: (o) => o.querySelectorAll("[data-cm]").forEach((el) => el.onclick = () => {
+        const a = el.dataset.cm; U.closeModal();
+        if (a === "open") openCard(id);
+        else if (a === "edit") { openCard(id); }
+        else if (a === "duplicate") { const nid = S.actions.duplicateCard(id); U.toast("Card duplicado ✓"); render(); }
+        else if (a === "variation") { const nid = S.actions.duplicateCard(id); S.actions.updateCard(nid, { title: c.title + " — Variação", status: "Ideia", nextAction: "Testar variação" }); U.toast("Variação criada ✓"); render(); }
+        else if (a === "correction") { const nid = S.actions.addCard({ title: "Correção — " + c.title, type: c.type, campaignId: c.campaignId, channel: c.channel, status: "Precisa corrigir", priority: "Alta", originCardId: id, correctionReason: "Ajuste geral", nextAction: "Regravar aplicando correção", strategy: Object.assign({}, c.strategy), script: Object.assign({}, c.script) }); U.toast("Card de correção criado ✓"); openCard(nid); }
+        else if (a === "delete") U.confirm("Apagar o card \"" + c.title + "\"?", () => { S.actions.deleteCard(id); U.toast("Card apagado"); render(); }, { danger: true, yes: "Apagar" });
+      }),
+    });
+  }
+
+  function columnMenu(name) {
+    const st = S.get().statuses.find((x) => x.name === name) || { name, color: "#8fa39c" };
+    U.modal({
+      title: "Coluna: " + name, size: "narrow",
+      body: `<div class="field"><label>Nome</label><input class="input" id="col-name" value="${esc(st.name)}"/></div>
+        <div class="field"><label>Cor</label><input type="color" id="col-color" value="${st.color}" style="width:60px;height:40px;border:1px solid var(--border-2);border-radius:8px;background:var(--bg-2)"/></div>`,
+      foot: `<button class="btn btn-danger btn-sm" id="col-del">Apagar coluna</button><span style="flex:1"></span><button class="btn btn-ghost" data-close>Cancelar</button><button class="btn btn-primary" id="col-save">Salvar</button>`,
+      onMount: (o) => {
+        o.querySelector("#col-save").onclick = () => { S.actions.renameStatus(name, o.querySelector("#col-name").value.trim(), o.querySelector("#col-color").value); U.closeModal(); U.toast("Coluna atualizada ✓"); render(); };
+        o.querySelector("#col-del").onclick = () => U.confirm("Apagar a coluna \"" + name + "\"? Os cards vão para outra coluna.", () => { S.actions.deleteStatus(name); U.closeModal(); U.toast("Coluna apagada"); render(); }, { danger: true, yes: "Apagar" });
+      },
+    });
+  }
+
+  function addColumn() {
+    U.modal({
+      title: "Nova coluna", size: "narrow",
+      body: `<div class="field"><label>Nome</label><input class="input" id="nc-name" placeholder="Ex: Revisão final"/></div>
+        <div class="field"><label>Cor</label><input type="color" id="nc-color" value="#10b981" style="width:60px;height:40px;border:1px solid var(--border-2);border-radius:8px;background:var(--bg-2)"/></div>`,
+      foot: `<button class="btn btn-ghost" data-close>Cancelar</button><button class="btn btn-primary" id="nc-ok">Adicionar</button>`,
+      onMount: (o) => o.querySelector("#nc-ok").onclick = () => { const n = o.querySelector("#nc-name").value.trim(); if (!n) return U.toast("Digite um nome", "warn"); S.actions.addStatus(n, o.querySelector("#nc-color").value); U.closeModal(); U.toast("Coluna adicionada ✓"); render(); },
+    });
   }
 
   function buyCredits() {
@@ -3428,7 +4222,7 @@ window.App = (function () {
     U.renderChat();
   }
 
-  return { init, render, renderNav, openCard, openIdea, openCampaignForm, openCardForm, openIdeaForm, openPersonaForm, openLibForm, quickAction, generateCards, buyCredits, openCreateMenu };
+  return { init, render, renderNav, openCard, openIdea, openCampaignForm, openCardForm, openIdeaForm, openPersonaForm, openLibForm, quickAction, generateCards, buyCredits, openCreateMenu, cardMenu, columnMenu, addColumn, libMenu, reuseLibrary };
 })();
 
 document.addEventListener("DOMContentLoaded", window.App.init);

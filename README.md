@@ -37,6 +37,20 @@ Complementado pelo conceito **RUA** — encontrar conteúdo na realidade (bastid
 
 ---
 
+## IA funcional (pouca entrada, muita saída)
+
+O VIRALIZA foi ajustado para você **informar o básico e a IA gerar o resto** — sem preencher dezenas de campos. A camada de IA é simulada (mock realista, pronta para trocar por API real em `assets/js/ai.js`) e **gera dados reais no app**, não apenas mensagens.
+
+- **Criar campanha é conversacional:** você descreve em uma frase e escolhe por botões (o que criar, canais, estilo, material, quantidade, público). A IA monta uma **prévia** e, ao confirmar, cria a campanha com **cards já preenchidos** (roteiro, gancho, cena de retenção, legenda, hashtags, CTA, checklist e direção de visual).
+- **Card enxuto, 5 abas:** Executar · Roteiro · Conteúdo · Checklist · Análise e Correção.
+  - *Executar:* próxima ação + estratégia sugerida pela IA + **Visual do vídeo** (roupa, ambiente, enquadramento, energia…) + ações.
+  - *Roteiro:* botões que geram de verdade — roteiro completo, 3 ganchos, stories, variação por público, versão curta/anúncio.
+  - *Checklist editável:* adicionar/editar/apagar item e grupo, renomear grupo.
+  - *Análise e Correção:* métricas + diagnóstico + **correção no mesmo card** (salva nova versão) ou **novo card de correção vinculado** (histórico de versões).
+- **Board tipo Trello:** arrastar entre colunas, menu ⋮ no card (abrir, editar, duplicar, variação, correção, apagar) e colunas editáveis (renomear, cor, apagar, adicionar).
+- **Biblioteca reutilizável:** reutilizar em card / nova campanha / variação, além de editar, copiar e apagar.
+- **Inteligência de público:** a IA gera subpúblicos (dor, desejo, linguagem, gancho, CTA, plataforma) na criação de campanha e na Persona, para criar variações por público.
+
 ## Estrutura (8 menus)
 
 1. **Hoje** — tela principal e objetiva: prioridades, ações rápidas, cards do dia, alertas.
@@ -111,12 +125,14 @@ assets/
   js/
     seed.js             Dados mockados realistas
     store.js            Estado + persistência (localStorage)
+    ai.js               Camada de IA (simulada): campanha, roteiro, visual, correção, público
     components.js       Modal, toast, chat contextual, helpers
     views.js            As 8 telas
+    campaign.js         Criar campanha com IA (conversacional)
     recorder.js         Captura Gravar agora (câmera + teleprompter)
     video.js            Vídeo do Card: revisar → retenção → abertura inteligente → versões
-    card.js             Card detalhado (9 abas)
-    app.js              Router, layout, formulários, init
+    card.js             Card detalhado (5 abas)
+    app.js              Router, layout, formulários, menus, init
 ```
 
 Para regenerar o arquivo único após editar o código: `node build.js`.

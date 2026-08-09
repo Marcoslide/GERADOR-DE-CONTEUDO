@@ -92,6 +92,14 @@ window.Store = (function () {
       card.checklist[gi].items[ii].done = !card.checklist[gi].items[ii].done;
       card.progress = sel.cardProgress(card);
     }),
+    chkAddItem: (cardId, gi, text) => update((s) => { const c = s.cards.find((x) => x.id === cardId); c.checklist[gi].items.push({ t: text, done: false }); c.progress = sel.cardProgress(c); }),
+    chkDelItem: (cardId, gi, ii) => update((s) => { const c = s.cards.find((x) => x.id === cardId); c.checklist[gi].items.splice(ii, 1); c.progress = sel.cardProgress(c); }),
+    chkEditItem: (cardId, gi, ii, text) => update((s) => { s.cards.find((x) => x.id === cardId).checklist[gi].items[ii].t = text; }),
+    chkAddGroup: (cardId, name) => update((s) => { s.cards.find((x) => x.id === cardId).checklist.push({ group: name, items: [] }); }),
+    chkDelGroup: (cardId, gi) => update((s) => { const c = s.cards.find((x) => x.id === cardId); c.checklist.splice(gi, 1); c.progress = sel.cardProgress(c); }),
+    chkRenameGroup: (cardId, gi, name) => update((s) => { s.cards.find((x) => x.id === cardId).checklist[gi].group = name; }),
+    setChecklist: (cardId, checklist) => update((s) => { const c = s.cards.find((x) => x.id === cardId); c.checklist = checklist; c.progress = sel.cardProgress(c); }),
+    duplicateCard: (id) => { let nid; update((s) => { const c = s.cards.find((x) => x.id === id); const copy = JSON.parse(JSON.stringify(c)); nid = uid("card"); copy.id = nid; copy.title = c.title + " (cópia)"; copy.video = { original: null, versions: [], retention: null, chosenVersionId: null }; copy.corrections = []; copy.analysis = { metrics: {}, done: false }; copy.createdAt = today(); s.cards.unshift(copy); }); return nid; },
     addCorrection: (cardId, data) => update((s) => {
       const card = s.cards.find((c) => c.id === cardId);
       card.corrections.unshift(Object.assign({ id: uid("cor"), status: "Aberta", createdAt: today() }, data));
@@ -103,6 +111,7 @@ window.Store = (function () {
     addFile: (cardId, data) => update((s) => { s.cards.find((c) => c.id === cardId).files.unshift(data); }),
 
     addLibrary: (data) => update((s) => { s.library.unshift(Object.assign({ id: uid("lib"), tags: [], source: "", createdAt: today() }, data)); }),
+    updateLibrary: (id, patch) => update((s) => { Object.assign(s.library.find((l) => l.id === id), patch); }),
     deleteLibrary: (id) => update((s) => { s.library = s.library.filter((l) => l.id !== id); }),
 
     updatePersona: (patch) => update((s) => { Object.assign(s.persona, patch); }),
@@ -120,7 +129,16 @@ window.Store = (function () {
     }),
 
     addStatus: (name, color) => update((s) => { s.statuses.push({ name, color }); }),
-    deleteStatus: (name) => update((s) => { s.statuses = s.statuses.filter((x) => x.name !== name); }),
+    deleteStatus: (name) => update((s) => {
+      const fallback = (s.statuses.find((x) => x.name !== name) || { name: "Ideia" }).name;
+      s.cards.forEach((c) => { if (c.status === name) c.status = fallback; });
+      s.statuses = s.statuses.filter((x) => x.name !== name);
+    }),
+    renameStatus: (oldName, newName, color) => update((s) => {
+      const st = s.statuses.find((x) => x.name === oldName); if (!st) return;
+      if (newName) { s.cards.forEach((c) => { if (c.status === oldName) c.status = newName; }); st.name = newName; }
+      if (color) st.color = color;
+    }),
     reset,
   };
 
